@@ -1,0 +1,88 @@
+import streamlit as st
+import feedparser
+import requests
+import random
+
+# --- CONFIG ---
+st.set_page_config(page_title="Football Monitor 2026", page_icon="⚽", layout="wide")
+
+# Custom CSS for that "Matrix/Dark" look
+st.markdown("""
+    <style>
+    .main { background-color: #050505; }
+    .stButton>button { background-color: #00ff41; color: black; font-weight: bold; width: 100%; }
+    .news-card {
+        background-color: #121212;
+        padding: 15px;
+        border-radius: 5px;
+        border: 1px solid #333;
+        margin-bottom: 10px;
+    }
+    .source-tag { color: #00ff41; font-size: 0.7rem; font-weight: bold; }
+    .headline { color: white; font-size: 1.1rem; font-weight: bold; text-decoration: none; }
+    .headline:hover { color: #00ff41; }
+    </style>
+    """, unsafe_allow_html=True)
+
+MASTER_SOURCES = [
+    ("Soccer Laduma", "https://www.snl24.com/soccerladuma/rss"),
+    ("KickOff", "https://www.snl24.com/kickoff/rss"),
+    ("Daily Sun Sport", "https://www.snl24.com/dailysun/sport/rss"),
+    ("SuperSport", "https://supersport.com/rss/football"),
+    ("Sowetan Live", "https://www.sowetanlive.co.za/sport/soccer/rss"),
+    ("BBC Football", "https://push.api.bbci.co.uk/morph/items?page=1&limit=10&feed=football"),
+    ("Sky Sports", "https://www.skysports.com/rss/12040"),
+    ("The Guardian", "https://www.theguardian.com/football/rss"),
+    ("Independent", "https://www.independent.co.uk/sport/football/rss"),
+    ("Daily Mail", "https://www.dailymail.co.uk/sport/football/index.rss"),
+    ("Evening Standard", "https://www.standard.co.uk/sport/football/rss"),
+    ("Goal.com", "https://www.goal.com/en/feeds/news"),
+    ("Transfermarkt", "https://www.transfermarkt.com/rss/news"),
+    ("Marca (Spain)", "https://e00-marca.uecdn.es/rss/en/index.xml"),
+    ("AS (Spain)", "https://en.as.com/rss/en/football/index.xml"),
+    ("Football Italia", "https://football-italia.net/feed/"),
+    ("90min", "https://www.90min.com/posts.rss"),
+    ("CaughtOffside", "https://www.caughtoffside.com/feed/"),
+    ("OneFootball", "https://onefootball.com/en/rss"),
+    ("World Soccer Talk", "https://worldsoccertalk.com/feed/"),
+    ("Google News: PSL", "https://news.google.com/rss/search?q=PSL+football+when:1h&hl=en-ZA&gl=ZA"),
+    ("Google News: Transfers", "https://news.google.com/rss/search?q=football+transfers+when:1h&hl=en-ZA&gl=ZA"),
+    ("Google News: Champions League", "https://news.google.com/rss/search?q=UEFA+Champions+League+when:1h&hl=en-ZA&gl=ZA")
+]
+
+def fetch_news():
+    shuffled_pool = list(MASTER_SOURCES)
+    random.shuffle(shuffled_pool)
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    news_to_show = []
+    
+    for name, url in shuffled_pool:
+        if len(news_to_show) >= 20: break
+        try:
+            cb_url = f"{url}&cb={random.random()}" if "?" in url else f"{url}?cb={random.random()}"
+            r = requests.get(cb_url, headers=headers, timeout=5)
+            f = feedparser.parse(r.content)
+            for e in f.entries[:2]:
+                if len(news_to_show) >= 20: break
+                news_to_show.append({'s': name, 't': e.title.rsplit(' - ', 1)[0], 'l': e.link})
+        except:
+            continue
+    return news_to_show
+
+# --- UI LAYOUT ---
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.title("⚽ DYNAMIC 20 FEED")
+with col2:
+    if st.button("🔄 GRAB NEW SOURCES"):
+        st.rerun()
+
+news_items = fetch_news()
+
+for idx, item in enumerate(news_items, 1):
+    st.markdown(f"""
+        <div class="news-card">
+            <div class="source-tag">{idx}. {item['s'].upper()}</div>
+            <a class="headline" href="{item['l']}" target="_blank">{item['t']}</a>
+        </div>
+    """, unsafe_allow_html=True)
