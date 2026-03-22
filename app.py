@@ -7,25 +7,48 @@ import time
 import random
 
 # --- CONFIG ---
-st.set_page_config(page_title="NEO-SCOUT // V11", page_icon="📡", layout="wide")
-
-# --- STYLE ---
-st.markdown("""
-<style>
-.stApp { background-color: #050505; }
-h1, h2, h3, p, span, div { color: #00ff41 !important; }
-.status-tag { font-size: 0.7rem; border: 1px solid #00ff41; padding: 2px 6px; }
-</style>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title="NEO-SCOUT // V12", page_icon="📡", layout="wide")
 
 # --- REFRESH ---
 if "refresh_key" not in st.session_state:
     st.session_state.refresh_key = 0
 
-if st.button("🔄 REFRESH FEEDS"):
+if st.button("🔄 REFRESH"):
     st.session_state.refresh_key += 1
     st.cache_data.clear()
     st.rerun()
+
+# --- CLEAN TEXT ---
+def clean_text(text):
+    lines = text.split("\n")
+    cleaned, seen = [], set()
+
+    for line in lines:
+        line = line.strip()
+
+        if len(line) < 40:
+            continue
+        if any(x in line.lower() for x in ["cookie", "subscribe", "sign up"]):
+            continue
+
+        if line not in seen:
+            seen.add(line)
+            cleaned.append(line)
+
+    return " ".join(cleaned)
+
+# --- CLEAN SUMMARY ---
+def clean_summary(summary):
+    sentences = summary.split(". ")
+    unique, seen = [], set()
+
+    for s in sentences:
+        s = s.strip()
+        if s and s not in seen:
+            seen.add(s)
+            unique.append(s)
+
+    return ". ".join(unique[:3]).strip() + "."
 
 # --- SIMILARITY ---
 def is_similar(t1, t2):
@@ -42,12 +65,17 @@ def scrape_intel(url):
     try:
         r = requests.get(url, timeout=6, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(r.content, 'html.parser')
+
         img = soup.find("meta", property="og:image")
 
         paras = [p.get_text().strip() for p in soup.find_all('p')]
         paras = [p for p in paras if len(p) > 60]
 
-        return " ".join(paras[:6]), (img["content"] if img else None)
+        text = " ".join(paras[:6])
+        text = clean_text(text)
+
+        return text, (img["content"] if img else None)
+
     except:
         return "", None
 
@@ -67,40 +95,48 @@ def merge_articles(main, all_items):
 
 # --- FALLBACK ---
 def smart_fallback(text):
-    s = text.split('. ')
+    s = text.split(". ")
     return ". ".join(s[:3]) if len(s) >= 3 else text[:200]
 
 # --- AI ---
 def query_ai(text, title=""):
     if "HF_TOKEN" not in st.secrets:
-        return smart_fallback(text)
+        return clean_summary(smart_fallback(text))
 
     API = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
     headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
 
     prompt = f"""
-Combine multiple football news sources into one clean summary.
+You are a professional football journalist.
 
-Rules:
-- Max 3 sentences
-- Merge facts
-- Remove duplicates
-- Focus on confirmed info
+Write a clean match report.
+
+FORMAT:
+1. Result + key player
+2. How match was decided
+3. Impact
+
+RULES:
+- Max 60 words
+- No repetition
+- Clear and sharp
 
 Title: {title}
 
-{text[:1500]}
+{text[:1200]}
 """
 
     try:
         r = requests.post(API, headers=headers, json={"inputs": prompt}, timeout=20)
         res = r.json()
+
         if isinstance(res, list):
-            return res[0]["summary_text"]
+            return clean_summary(res[0]["summary_text"])
+
     except:
         pass
 
-    return smart_fallback(text)
+    return clean_summary(smart_fallback(text))
 
 @st.cache_data(ttl=3600)
 def cached_summary(text, title):
@@ -117,7 +153,7 @@ def generate_tags(title):
 def is_breaking(title):
     return any(k in title for k in ["BREAKING", "CONFIRMED"])
 
-# --- FEEDS (20) ---
+# --- FEEDS ---
 @st.cache_data(ttl=600)
 def get_news(key):
     feeds = [
@@ -156,14 +192,14 @@ def get_news(key):
     return out
 
 # --- UI ---
-st.title("📡 NEO-SCOUT // V11 INTELLIGENCE CORE")
+st.title("📡 NEO-SCOUT // V12 PRO INTELLIGENCE")
 
 news = get_news(st.session_state.refresh_key)
 
 for item in news:
     with st.container():
 
-        st.markdown(f'<div class="status-tag">{item["src"]}</div>', unsafe_allow_html=True)
+        st.markdown(f"**{item['src']}**")
 
         if is_breaking(item["title"]):
             st.error("🚨 BREAKING")
@@ -172,7 +208,7 @@ for item in news:
 
         if st.button("🧠 MULTI-SOURCE INTEL", key=item["id"]):
 
-            with st.spinner("AGGREGATING SOURCES..."):
+            with st.spinner("AGGREGATING + CLEANING + ANALYZING..."):
 
                 merged_text, related, img = merge_articles(item, news)
 
@@ -198,4 +234,4 @@ for item in news:
                 st.code(full)
 
 st.markdown("---")
-st.write("SYSTEM ACTIVE // V11")
+st.write("SYSTEM ACTIVE // V12 PRO")
