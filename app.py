@@ -9,6 +9,78 @@ import random
 # --- CONFIG ---
 st.set_page_config(page_title="NEO-SCOUT // V12", page_icon="📡", layout="wide")
 
+# --- UI: GOOGLE + GLASS STYLE ---
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif;
+    background: linear-gradient(135deg, #eef2ff, #f8fafc);
+}
+
+.block-container {
+    max-width: 820px;
+    margin: auto;
+    padding-top: 80px;
+}
+
+.glass {
+    background: rgba(255,255,255,0.25);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-radius: 20px;
+    padding: 25px;
+    border: 1px solid rgba(255,255,255,0.3);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+}
+
+.news-card {
+    background: rgba(255,255,255,0.55);
+    backdrop-filter: blur(12px);
+    border-radius: 18px;
+    padding: 18px;
+    margin-bottom: 18px;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
+
+.news-card:hover {
+    transform: translateY(-5px);
+}
+
+div.stButton > button {
+    border-radius: 999px;
+    background: white;
+    border: 1px solid #ddd;
+    padding: 8px 18px;
+    transition: 0.2s;
+}
+
+div.stButton > button:hover {
+    background: #f1f3f4;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+}
+
+.google-title {
+    text-align: center;
+    font-size: 42px;
+    font-weight: 600;
+    margin-bottom: 20px;
+}
+
+.breaking {
+    color: white;
+    background: #ea4335;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    display: inline-block;
+    margin-bottom: 8px;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # --- REFRESH ---
 if "refresh_key" not in st.session_state:
     st.session_state.refresh_key = 0
@@ -25,12 +97,10 @@ def clean_text(text):
 
     for line in lines:
         line = line.strip()
-
         if len(line) < 40:
             continue
         if any(x in line.lower() for x in ["cookie", "subscribe", "sign up"]):
             continue
-
         if line not in seen:
             seen.add(line)
             cleaned.append(line)
@@ -67,7 +137,6 @@ def scrape_intel(url):
         soup = BeautifulSoup(r.content, 'html.parser')
 
         img = soup.find("meta", property="og:image")
-
         paras = [p.get_text().strip() for p in soup.find_all('p')]
         paras = [p for p in paras if len(p) > 60]
 
@@ -129,10 +198,8 @@ Title: {title}
     try:
         r = requests.post(API, headers=headers, json={"inputs": prompt}, timeout=20)
         res = r.json()
-
         if isinstance(res, list):
             return clean_summary(res[0]["summary_text"])
-
     except:
         pass
 
@@ -191,47 +258,64 @@ def get_news(key):
             })
     return out
 
-# --- UI ---
-st.title("📡 NEO-SCOUT // V12 PRO INTELLIGENCE")
+# --- HEADER ---
+st.markdown("""
+<div class="google-title">
+<span style='color:#4285F4'>N</span>
+<span style='color:#EA4335'>E</span>
+<span style='color:#FBBC05'>O</span>
+<span style='color:#4285F4'>-</span>
+<span style='color:#34A853'>S</span>
+<span style='color:#EA4335'>C</span>
+<span style='color:#4285F4'>O</span>
+<span style='color:#FBBC05'>U</span>
+<span style='color:#34A853'>T</span>
+</div>
+""", unsafe_allow_html=True)
+
+# --- MAIN ---
+st.markdown('<div class="glass">', unsafe_allow_html=True)
 
 news = get_news(st.session_state.refresh_key)
 
 for item in news:
-    with st.container():
+    st.markdown('<div class="news-card">', unsafe_allow_html=True)
 
-        st.markdown(f"**{item['src']}**")
+    st.caption(f"🌐 {item['src']}")
 
-        if is_breaking(item["title"]):
-            st.error("🚨 BREAKING")
+    if is_breaking(item["title"]):
+        st.markdown('<div class="breaking">🚨 BREAKING</div>', unsafe_allow_html=True)
 
-        st.subheader(item["title"])
+    st.subheader(item["title"])
 
-        if st.button("🧠 MULTI-SOURCE INTEL", key=item["id"]):
+    if st.button("🧠 MULTI-SOURCE INTEL", key=item["id"]):
+        with st.spinner("AGGREGATING + CLEANING + ANALYZING..."):
 
-            with st.spinner("AGGREGATING + CLEANING + ANALYZING..."):
+            merged_text, related, img = merge_articles(item, news)
 
-                merged_text, related, img = merge_articles(item, news)
+            if img:
+                st.image(img)
+                try:
+                    st.download_button("DOWNLOAD IMAGE", requests.get(img).content)
+                except:
+                    pass
 
-                if img:
-                    st.image(img)
+            summary = cached_summary(merged_text, item["title"])
+            tags = generate_tags(item["title"])
 
-                    try:
-                        st.download_button("DOWNLOAD IMAGE", requests.get(img).content)
-                    except:
-                        pass
+            st.success(f"SOURCES USED: {1 + len(related)}")
 
-                summary = cached_summary(merged_text, item["title"])
-                tags = generate_tags(item["title"])
+            for r in related:
+                st.caption(f"↳ {r['src']}")
 
-                st.success(f"SOURCES USED: {1 + len(related)}")
+            full = f"⚽ {item['title']}\n\n{summary}\n\n{tags}"
 
-                for r in related:
-                    st.caption(f"↳ {r['src']}")
+            st.text_area("OUTPUT", full, height=200)
+            st.code(full)
 
-                full = f"⚽ {item['title']}\n\n{summary}\n\n{tags}"
+    st.markdown("</div>", unsafe_allow_html=True)
 
-                st.text_area("OUTPUT", full, height=200)
-                st.code(full)
+st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("---")
 st.write("SYSTEM ACTIVE // V12 PRO")
