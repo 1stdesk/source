@@ -3,11 +3,11 @@ import requests
 import feedparser
 import hashlib
 from bs4 import BeautifulSoup
-import random
 from collections import Counter
+import random
 
 # --- CONFIG ---
-st.set_page_config(page_title="NEO-SCOUT V14", page_icon="📡", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT V15", page_icon="📡", layout="wide")
 
 # --- SESSION ---
 if "refresh_key" not in st.session_state:
@@ -15,41 +15,32 @@ if "refresh_key" not in st.session_state:
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.title("📡 NEO-SCOUT")
+    st.title("📡 NEO-SCOUT V15")
 
-    if st.button("🔄 Refresh"):
+    if st.button("🔄 Refresh Feed"):
         st.session_state.refresh_key += 1
         st.cache_data.clear()
         st.rerun()
 
     st.markdown("---")
-    st.subheader("Filters")
 
-    show_breaking = st.checkbox("🚨 Breaking Only")
-    auto_ai = st.checkbox("🧠 Auto AI", value=True)
+    auto_ai = st.checkbox("🧠 Auto AI", value=False)
     show_images = st.checkbox("🖼 Images", value=True)
 
-# --- CLEAN TEXT ---
+# --- UTIL ---
 def clean_text(text):
-    lines = text.split("\n")
-    cleaned = []
-    for l in lines:
-        l = l.strip()
-        if len(l) > 40 and "cookie" not in l.lower():
-            cleaned.append(l)
-    return " ".join(cleaned)
+    return " ".join([l.strip() for l in text.split("\n") if len(l) > 40])
 
 def clean_summary(text):
     s = text.split(". ")
-    return ". ".join(s[:3]).strip() + "."
+    return ". ".join(s[:3]) + "."
 
-# --- SIMILARITY ---
-def is_similar(a, b):
-    s1 = set(a.lower().split())
-    s2 = set(b.lower().split())
-    return len(s1 & s2) >= 3
+def keywords(title):
+    ignore = {"THE","AND","TO","IN","OF","FOR","WITH"}
+    return [w for w in title.split() if w not in ignore]
 
-# --- SCRAPER ---
+# --- SCRAPER (CACHED PER URL) ---
+@st.cache_data(ttl=1800)
 def scrape(url):
     try:
         r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
@@ -58,14 +49,14 @@ def scrape(url):
         img = soup.find("meta", property="og:image")
 
         paras = [p.get_text() for p in soup.find_all("p")]
-        text = clean_text(" ".join(paras[:5]))
+        text = clean_text(" ".join(paras[:6]))
 
         return text, (img["content"] if img else None)
     except:
         return "", None
 
 # --- AI ---
-def ai_summary(text, title):
+def ai_summary(text):
     if "HF_TOKEN" not in st.secrets:
         return clean_summary(text)
 
@@ -73,7 +64,7 @@ def ai_summary(text, title):
         API = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
         headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
 
-        r = requests.post(API, headers=headers, json={"inputs": text[:1200]}, timeout=15)
+        r = requests.post(API, headers=headers, json={"inputs": text[:1000]}, timeout=10)
         out = r.json()
 
         if isinstance(out, list):
@@ -83,10 +74,6 @@ def ai_summary(text, title):
 
     return clean_summary(text)
 
-@st.cache_data(ttl=3600)
-def cached_ai(text, title):
-    return ai_summary(text, title)
-
 # --- FEEDS ---
 @st.cache_data(ttl=600)
 def get_news(key):
@@ -95,87 +82,112 @@ def get_news(key):
         "https://www.skysports.com/rss/12040",
         "http://feeds.bbci.co.uk/sport/football/rss.xml",
         "https://www.espn.com/espn/rss/soccer/news",
-        "https://www.theguardian.com/football/rss"
+        "https://www.theguardian.com/football/rss",
     ]
 
     seen = set()
-    data = []
+    items = []
 
     for f in feeds:
         feed = feedparser.parse(f)
         for e in feed.entries[:4]:
+
             title = e.title.upper()
 
             if title in seen:
                 continue
             seen.add(title)
 
-            data.append({
+            items.append({
                 "id": hashlib.md5(e.link.encode()).hexdigest(),
                 "title": title,
                 "link": e.link,
                 "src": f.split('/')[2]
             })
 
-    return data
+    return items
+
+# --- GROUP SIMILAR ---
+def group_news(news):
+    groups = []
+    used = set()
+
+    for item in news:
+        if item["id"] in used:
+            continue
+
+        group = [item]
+        used.add(item["id"])
+
+        for other in news:
+            if other["id"] not in used:
+                if len(set(keywords(item["title"])) & set(keywords(other["title"]))) >= 3:
+                    group.append(other)
+                    used.add(other["id"])
+
+        groups.append(group)
+
+    return groups
 
 # --- TRENDING ---
-def get_trending(news):
+def get_trends(news):
     words = []
-    ignore = {"THE","AND","TO","IN","OF","FOR"}
     for n in news:
-        words += [w for w in n["title"].split() if w not in ignore]
-    return Counter(words).most_common(8)
-
-# --- BREAKING ---
-def is_breaking(title):
-    return "BREAKING" in title or "CONFIRMED" in title
+        words += keywords(n["title"])
+    return Counter(words).most_common(10)
 
 # --- HEADER ---
-st.title("📡 NEO-SCOUT V14")
-st.caption("Elite Football Intelligence System")
+st.title("📡 NEO-SCOUT V15")
+st.caption("Live Football Intelligence Feed")
 
-# --- MAIN LAYOUT ---
 news = get_news(st.session_state.refresh_key)
+groups = group_news(news)
 
 col_main, col_side = st.columns([3,1])
 
 # --- MAIN FEED ---
 with col_main:
 
-    # Breaking banner
-    breaking_news = [n for n in news if is_breaking(n["title"])]
+    for group in groups:
 
-    if breaking_news:
-        st.error(f"🚨 BREAKING: {breaking_news[0]['title']}")
+        main = group[0]
 
-    for item in news:
+        st.markdown("### " + main["title"])
+        st.caption(main["src"])
 
-        if show_breaking and not is_breaking(item["title"]):
-            continue
+        cols = st.columns([1,1,1])
 
-        st.markdown("---")
-        st.subheader(item["title"])
-        st.caption(item["src"])
+        with cols[0]:
+            if st.button("🧠 Analyze", key=main["id"]):
 
-        with st.expander("📊 View Intelligence"):
+                text, img = scrape(main["link"])
 
-            text, img = scrape(item["link"])
+                if img and show_images:
+                    st.image(img)
 
-            if img and show_images:
-                st.image(img)
-
-            if auto_ai:
-                summary = cached_ai(text, item["title"])
+                summary = ai_summary(text)
                 st.write(summary)
 
-# --- SIDE PANEL ---
+        with cols[1]:
+            st.markdown(f"[🔗 Open Article]({main['link']})")
+
+        with cols[2]:
+            tags = keywords(main["title"])[:3]
+            st.caption(" ".join([f"#{t}" for t in tags]))
+
+        if len(group) > 1:
+            with st.expander(f"Related ({len(group)-1})"):
+                for g in group[1:]:
+                    st.write(g["title"])
+
+        st.markdown("---")
+
+# --- SIDE ---
 with col_side:
     st.subheader("🔥 Trending")
 
-    trends = get_trending(news)
-    for t, c in trends:
-        st.write(f"{t} ({c})")
+    for word, count in get_trends(news):
+        st.write(f"{word} ({count})")
 
 st.markdown("---")
-st.write("SYSTEM ACTIVE // V14 ELITE")
+st.write("SYSTEM ACTIVE // V15 FEED ENGINE")
