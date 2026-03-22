@@ -2,24 +2,13 @@ import streamlit as st
 import feedparser
 import requests
 from bs4 import BeautifulSoup
-import re
+import random
 
 # --- CONFIG ---
-st.set_page_config(page_title="Soccer Scout Simple", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="Randomized Soccer Hub", page_icon="⚽", layout="wide")
 
-st.markdown("""
-    <style>
-    .main { background-color: #050505; color: white; }
-    .stCode { background-color: #111 !important; border: 1px solid #00ff41 !important; color: #e0e0e0 !important; }
-    .news-card {
-        background-color: #111; border: 1px solid #333; border-radius: 10px;
-        padding: 10px; height: 380px; transition: 0.3s;
-    }
-    .news-card:hover { border-color: #00ff41; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- THE 20 SOURCES ---
+# --- SOURCE POOLS ---
+# Original 20
 MASTER_POOL = [
     ("Goal.com", "https://www.goal.com/en/feeds/news"),
     ("Sky Sports", "https://www.skysports.com/rss/12040"),
@@ -43,15 +32,34 @@ MASTER_POOL = [
     ("Daily Sun Soccer", "https://www.snl24.com/dailysun/sport/rss")
 ]
 
-@st.cache_data(ttl=600)
-def fetch_grid():
+# New "Random" Backup Sources
+RESERVE_POOL = [
+    ("The Athletic", "https://theathletic.com/rss"),
+    ("Mirror Football", "https://www.mirror.co.uk/sport/football/rss.xml"),
+    ("The Sun Football", "https://www.thesun.co.uk/sport/football/feed/"),
+    ("Liverpool Echo", "https://www.liverpoolecho.co.uk/sport/football/rss.xml"),
+    ("Manchester Evening News", "https://www.manchestereveningnews.co.uk/sport/football/rss.xml"),
+    ("TalkSport", "https://talksport.com/football/feed/"),
+    ("OneFootball", "https://onefootball.com/en/rss"),
+    ("Football.London", "https://www.football.london/rss.xml"),
+    ("EuroSport", "https://www.eurosport.com/football/rss.xml"),
+    ("Sporting News", "https://www.sportingnews.com/us/rss/soccer")
+]
+
+ALL_SOURCES = MASTER_POOL + RESERVE_POOL
+
+# --- CORE FUNCTIONS ---
+def get_random_20():
+    """Shuffles the entire list and picks 20 random sources."""
+    selected = random.sample(ALL_SOURCES, 20)
     data = []
     headers = {'User-Agent': 'Mozilla/5.0'}
-    for name, url in MASTER_POOL:
+    for name, url in selected:
         try:
             f = feedparser.parse(url)
             if f.entries:
                 e = f.entries[0]
+                # Thumbnail extraction
                 r = requests.get(e.link, headers=headers, timeout=3)
                 soup = BeautifulSoup(r.content, 'html.parser')
                 img = soup.find("meta", property="og:image")
@@ -60,68 +68,41 @@ def fetch_grid():
         except: continue
     return data
 
-def quick_scrape(url):
-    try:
-        r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-        soup = BeautifulSoup(r.content, 'html.parser')
-        paras = [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 100]
-        return paras[0] if paras else "Full story details at the link."
-    except: return "Summary unavailable."
-
-# --- UI DISPLAY ---
-st.title("⚽ 20-Source Newsroom")
+# --- UI ---
+st.title("⚽ RANDOMIZED GLOBAL NEWSROOM")
+st.subheader("Click 'Refresh' to cycle through 30+ different world sources")
 
 if 'visual_feed' not in st.session_state:
-    st.session_state.visual_feed = fetch_grid()
+    st.session_state.visual_feed = get_random_20()
 
+# GRID DISPLAY
 cols = st.columns(4)
 for idx, item in enumerate(st.session_state.visual_feed):
     with cols[idx % 4]:
         st.markdown(f'''
-            <div class="news-card">
-                <img src="{item['img']}" style="width:100%; height:160px; object-fit:cover; border-radius:5px;">
-                <p style="color:#00ff41; font-size:12px; margin:10px 0 0 0;">{item['s']}</p>
-                <p style="font-weight:bold; font-size:14px;">{item['t']}</p>
+            <div style="background-color:#111; padding:10px; border-radius:10px; border:1px solid #333; height:380px;">
+                <img src="{item['img']}" style="width:100%; height:150px; object-fit:cover; border-radius:5px;">
+                <p style="color:#00ff41; font-weight:bold; font-size:12px; margin-top:5px;">{item['s']}</p>
+                <p style="font-size:14px; height:60px; overflow:hidden;">{item['t']}</p>
             </div>
         ''', unsafe_allow_html=True)
         if st.button("Generate Post", key=f"btn_{idx}"):
             st.session_state.active = item
 
-st.divider()
-
-# --- THE SIMPLIFIED SUMMARY OUTPUT ---
+# POST GENERATION
 if 'active' in st.session_state:
     it = st.session_state.active
-    with st.spinner("Simplifying summary..."):
-        detail = quick_scrape(it['l'])
-        # Automatic Hashtags based on source and topic
-        tag_line = f"#{it['s'].replace(' ', '')} #Football #SoccerNews #Update2026"
-        
-        # 1. THE DEEP SCOOP
-        deep_text = (
-            f"📰 **THE DEEP SCOOP: {it['t'].upper()}**\n\n"
-            f"⚽ **DETAILS:** {detail}\n\n"
-            f"🔗 **FULL STORY:** {it['l']}\n\n"
-            f"{tag_line}"
-        )
+    st.divider()
+    tag_line = f"#{it['s'].replace(' ', '')} #Soccer #Update2026"
+    
+    deep_text = f"📰 **THE DEEP SCOOP: {it['t'].upper()}**\n\n⚽ {it['t']}\n\n🔗 **FULL STORY:** {it['l']}\n\n{tag_line}"
+    fast_text = f"⚡ **FAST UPDATE**\n\n📍 {it['t']}\n\n👉 Details: {it['l']}\n\n{tag_line}"
 
-        # 2. THE FAST UPDATE
-        fast_text = (
-            f"⚡ **FAST UPDATE**\n\n"
-            f"📍 {it['t']}\n\n"
-            f"👉 Details: {it['l']}\n\n"
-            f"{tag_line}"
-        )
+    c1, c2 = st.columns(2)
+    with c1: st.code(deep_text, language="markdown")
+    with c2: st.code(fast_text, language="markdown")
 
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("Option 1: Detailed Post")
-            st.code(deep_text, language="markdown")
-        with c2:
-            st.subheader("Option 2: Short Post")
-            st.code(fast_text, language="markdown")
-
-if st.button("🔄 Refresh Grid"):
-    st.cache_data.clear()
-    del st.session_state.visual_feed
+# REFRESH BUTTON (Shuffles the deck)
+if st.button("🔄 REFRESH & RANDOMIZE SOURCES"):
+    st.session_state.visual_feed = get_random_20()
     st.rerun()
