@@ -2,11 +2,12 @@ import streamlit as st
 import requests
 import feedparser
 import hashlib
+from bs4 import BeautifulSoup
 import time
 import random
 
-# --- CONFIG & TERMINAL STYLING ---
-st.set_page_config(page_title="NEO-SCOUT // V8.7_PRO", page_icon="📡", layout="wide")
+# --- CONFIG ---
+st.set_page_config(page_title="NEO-SCOUT // V8.2", page_icon="📡", layout="wide")
 
 st.markdown("""
     <style>
@@ -16,139 +17,116 @@ st.markdown("""
     .stElementContainer div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #0a0a0a !important;
         border: 1px solid #00ff41 !important;
+        box-shadow: 0 0 15px rgba(0, 255, 65, 0.2);
         padding: 20px; border-radius: 2px; margin-bottom: 20px;
     }
-    .intel-label { color: #ff0055 !important; font-weight: bold; font-size: 0.8rem; text-transform: uppercase; border: 1px solid #ff0055; padding: 2px 4px; }
-    .intel-box { background-color: #001a00; border-left: 4px solid #00ff41; padding: 15px; margin: 10px 0; border-radius: 0 5px 5px 0; }
+    .node-label { color: #ff0055 !important; font-weight: bold; font-size: 0.8rem; border: 1px solid #ff0055; padding: 2px 5px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- AI READER (Bypasses Paywalls & Cleans HTML) ---
-def get_clean_markdown(url):
-    """Uses r.jina.ai to strip ads/paywalls and get LLM-ready text."""
+# --- SCRAPER & AI FUNCTIONS (Sanitized from previous step) ---
+def scrape_intel(url):
     try:
-        reader_url = f"https://r.jina.ai/{url}"
-        # We add a common User-Agent to look like a standard browser
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        r = requests.get(reader_url, timeout=12, headers=headers)
-        if r.status_code == 200 and len(r.text) > 200:
-            return r.text
-    except:
-        return ""
-    return ""
+        r = requests.get(url, timeout=7, headers={'User-Agent': 'Mozilla/5.0'})
+        soup = BeautifulSoup(r.content, 'html.parser')
+        img = soup.find("meta", property="og:image")
+        junk_keywords = ["attendance:", "vs", "kick-off", "referee:", "copyright"]
+        paragraphs = []
+        for p in soup.find_all('p'):
+            text = " ".join(p.get_text().split())
+            if len(text) > 80 and not any(junk in text.lower() for junk in junk_keywords):
+                paragraphs.append(text)
+        return " ".join(paragraphs[:4]), (img["content"] if img else None)
+    except: return "", None
 
-# --- STRUCTURED AI ANALYZER (With Wake-Up Logic) ---
-def query_ai_report(text):
+def query_ai_deep(text):
     API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-    if "HF_TOKEN" not in st.secrets: return None
-    
-    # CRITICAL: "X-Wait-For-Model" forces the free API to wake up the model
-    headers = {
-        "Authorization": f"Bearer {st.secrets['HF_TOKEN']}",
-        "X-Wait-For-Model": "true",
-        "Content-Type": "application/json"
-    }
-    
-    payload = {
-        "inputs": text[:1200], # Keep it within token limits for speed
-        "parameters": {"do_sample": False, "max_length": 180, "min_length": 80}
-    }
-    
-    try:
-        r = requests.post(API_URL, headers=headers, json=payload, timeout=25)
-        res = r.json()
-        
-        # If the API returns the summary successfully
-        if isinstance(res, list) and 'summary_text' in res[0]:
-            summary = res[0]['summary_text']
-            sentences = [s.strip() for s in summary.split(". ") if len(s) > 10]
-            return {
-                "event": sentences[0] if len(sentences) > 0 else "Analysis pending.",
-                "analysis": sentences[1] if len(sentences) > 1 else "Situation developing.",
-                "history": ". ".join(sentences[2:]) if len(sentences) > 2 else "Historical data archived."
-            }
-    except Exception as e:
-        st.error(f">> SATELLITE_LAG: {e}")
-    
-    # EMERGENCY FALLBACK: If AI is truly down, manually slice the text
-    manual_slices = text.split("\n\n")
-    clean_slices = [s for s in manual_slices if len(s) > 40]
-    return {
-        "event": clean_slices[0][:150] if len(clean_slices) > 0 else "Intel stream offline.",
-        "analysis": "MANUAL_RECOVERY: Signal interference detected.",
-        "history": "HISTORICAL_ARCHIVES: Check source link for deep context."
-    }
+    if "HF_TOKEN" not in st.secrets: return "ERROR: TOKEN_NOT_FOUND"
+    headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
+    payload = {"inputs": text[:1024], "parameters": {"max_length": 150, "min_length": 60}}
+    for _ in range(2):
+        try:
+            r = requests.post(API_URL, headers=headers, json=payload, timeout=15)
+            res = r.json()
+            if isinstance(res, list): return res[0]['summary_text']
+            time.sleep(3)
+        except: continue
+    return f"[AUTO_GEN]: {'. '.join(text.split('. ')[:2])}."
 
-# --- PAYWALL-FREE SOURCE FEED ---
-@st.cache_data(ttl=600)
-def get_live_stream():
-    # Audited for 2026 (No Hard Paywalls)
-    sources = [
-        "https://feeds.bbci.co.uk/sport/football/rss.xml",
-        "https://www.skysports.com/rss/12040",
+# --- MULTI-SOURCE ENGINE ---
+@st.cache_data(ttl=300)
+def get_randomized_feed():
+    # 10+ Diverse Global Sources
+    feed_pool = [
         "https://www.goal.com/en/feeds/news",
+        "https://www.skysports.com/rss/12040",
+        "https://api.foxsports.com/v1/rss?partnerKey=zBaFxYLoverq&tag=soccer",
         "https://www.espn.com/espn/rss/soccer/news",
+        "https://feeds.bbci.co.uk/sport/football/rss.xml",
+        "https://www.fifa.com/rss/index.xml",
+        "https://www.football365.com/feed",
         "https://www.90min.com/posts.rss",
-        "https://www.football365.com/feed"
+        "https://www.caughtoffside.com/feed/",
+        "https://www.theguardian.com/football/rss"
     ]
-    random.shuffle(sources)
-    stream = []
-    for url in sources[:4]: # Sample 4 random nodes
+    
+    # Shuffle the list of URLs so different sources appear at the top
+    random.shuffle(feed_pool)
+    
+    full_stream = []
+    # Only process the first 5-6 random sources to keep it fast
+    for url in feed_pool[:6]: 
         try:
             f = feedparser.parse(url)
-            src_label = url.split('/')[2].upper().replace('WWW.', '')
-            for entry in f.entries[:4]:
-                stream.append({
-                    "id": hashlib.md5(entry.link.encode()).hexdigest(), 
-                    "title": entry.title.upper(), 
-                    "link": entry.link, 
-                    "src": src_label
+            source_name = url.split('/')[2].replace('www.', '').upper()
+            for entry in f.entries[:3]: # Take 3 hottest stories from each random source
+                full_stream.append({
+                    "id": hashlib.md5(entry.link.encode()).hexdigest(),
+                    "title": entry.title.upper(),
+                    "link": entry.link,
+                    "src": source_name
                 })
         except: continue
-    return stream
+    
+    # Final shuffle of the individual stories
+    random.shuffle(full_stream)
+    return full_stream
 
-# --- MAIN UI ---
-st.title("📡 NEO-SCOUT // V8.7_BATTLE_HARDENED")
+# --- UI INTERFACE ---
+st.title("📡 NEO-SCOUT // MULTI-NODE_V8.2")
 
-if st.button("🔄 RE-SCAN GLOBAL NODES"):
+# Refresh Logic
+if st.button("🔄 RE-SCAN_SATELLITE_FEED"):
     st.cache_data.clear()
     st.rerun()
 
-news_stream = get_live_stream()
+news_stream = get_randomized_feed()
+
+st.write(f">> {len(news_stream)} INTEL_PACKETS_INTERCEPTED")
 
 for item in news_stream:
     with st.container(border=True):
-        st.markdown(f"<span class='intel-label'>NODE: {item['src']}</span>", unsafe_allow_html=True)
+        st.markdown(f'<span class="node-label">NODE: {item["src"]}</span>', unsafe_allow_html=True)
         st.subheader(item['title'])
         
-        if st.button("🔬 DECRYPT_DEEP_REPORT", key=item['id']):
-            with st.spinner(">> INTERCEPTING_PACKETS..."):
-                # 1. Clean the website content (bypass paywalls)
-                content = get_clean_markdown(item['link'])
+        if st.button("🔬 DECRYPT_REPORT", key=item['id']):
+            with st.spinner(">> ANALYZING_SOURCE_DATA..."):
+                clean_text, image = scrape_intel(item['link'])
+                if image: st.image(image, use_container_width=True)
                 
-                if content:
-                    # 2. Structured AI Processing
-                    report = query_ai_report(content)
+                if len(clean_text) > 100:
+                    summary = query_ai_deep(clean_text)
+                    st.info(summary)
                     
-                    if report:
-                        st.markdown(f"""
-                            <div class="intel-box">
-                                <strong>📍 [THE_EVENT]</strong><br>{report['event']}.<br><br>
-                                <strong>🧠 [SYSTEM_ANALYSIS]</strong><br>{report['analysis']}.<br><br>
-                                <strong>📜 [HISTORICAL_CONTEXT]</strong><br>{report['history']}
-                            </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # Ready for Social Media
-                        ready_post = (f"⚽ {item['title']}\n\n"
-                                     f"📍 EVENT: {report['event']}\n\n"
-                                     f"🧠 ANALYSIS: {report['analysis']}\n\n"
-                                     f"📜 HISTORY: {report['history']}\n\n"
-                                     f"#FootballNews #NeoScout #ViralReport")
-                        
-                        st.text_area(">> READY_TO_BROADCAST:", value=ready_post, height=250)
+                    # Social Post Construction
+                    tags = "#SportsNews #Viral #Football " + f"#{item['src'].split('.')[0]}"
+                    st.text_area(">> BROADCAST_READY:", 
+                                value=f"📡 {item['title']}\n\n{summary}\n\n{tags}", 
+                                height=150)
                 else:
-                    st.error(">> ACCESS_DENIED: NODE_PROTECTED_OR_OFFLINE")
+                    st.error(">> ACCESS_DENIED: DATA_ENCRYPTED_OR_EMPTY")
+        
+        st.markdown(f"[>> SOURCE_LINK]({item['link']})")
 
 st.markdown("---")
-st.write(">> SYSTEM_ACTIVE // ALL_NODES_STABLE")
+st.write(">> SYSTEM_ACTIVE // ALL_NODES_OPERATIONAL")
