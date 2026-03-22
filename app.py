@@ -7,7 +7,7 @@ import time
 
 # --- PAGE CONFIG ---
 st.set_page_config(
-    page_title="Pro Soccer Scout AI v6.0", 
+    page_title="Soccer Scout AI v6.1", 
     page_icon="⚽", 
     layout="wide"
 )
@@ -19,144 +19,116 @@ st.markdown("""
     .stButton>button { 
         width: 100%; border-radius: 8px; height: 3em; 
         background-color: #238636; color: white; font-weight: bold;
-        border: none; transition: 0.3s;
+        border: none;
     }
-    .stButton>button:hover { background-color: #2ea043; border: 1px solid white; }
     .report-box { 
         background-color: #161b22; padding: 20px; 
         border-radius: 10px; border: 1px solid #30363d;
         line-height: 1.6; color: #e6edf3;
     }
-    .source-tag { color: #58a6ff; font-size: 0.8rem; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- AI API LOGIC (The "Self-Healing" Engine) ---
+# --- AI API LOGIC (The New 2026 Router Fix) ---
 def query_ai(text):
-    """Sends text to Hugging Face API with automatic retry for 'Cold Starts'."""
-    API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+    """Sends text to the NEW Hugging Face Router API."""
+    # UPDATED ENDPOINT FOR 2026
+    API_URL = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn"
     
     if "HF_TOKEN" not in st.secrets:
-        st.error("Missing 'HF_TOKEN' in Streamlit Secrets!")
+        st.error("Error: 'HF_TOKEN' not found in Streamlit Secrets.")
         return None
     
     headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
     payload = {
         "inputs": text[:1024],
-        "parameters": {"do_sample": False, "max_length": 100, "min_length": 40}
+        "parameters": {"do_sample": False, "max_length": 90, "min_length": 35}
     }
 
-    # Attempt to call the API up to 3 times if it's warming up
+    # Handle 'Cold Start' (Model Loading)
     for i in range(3):
         try:
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=20)
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
             result = response.json()
 
-            # Handle Model Loading/Warming up
             if isinstance(result, dict) and "estimated_time" in result:
-                wait_time = int(result['estimated_time'])
-                st.info(f"⏳ AI is warming up (Attempt {i+1}/3). Waiting {min(wait_time, 10)}s...")
-                time.sleep(min(wait_time, 10))
+                st.info(f"⏳ AI is warming up... waiting {int(result['estimated_time'])}s")
+                time.sleep(8)
                 continue
             
-            # Handle Success
             if isinstance(result, list) and len(result) > 0:
                 return result[0]['summary_text']
             
             return f"⚠️ API Error: {result}"
-        
         except Exception as e:
             if i == 2: return f"❌ Connection Timeout: {e}"
             time.sleep(2)
-            
-    return "😴 The AI is taking too long to wake up. Please try again in 30 seconds."
+    return "😴 AI timed out. Please try again."
 
-# --- SCRAPER LOGIC ---
-@st.cache_data(ttl=600) # Cache news for 10 minutes
-def fetch_soccer_news():
+# --- DATA FUNCTIONS ---
+@st.cache_data(ttl=600)
+def fetch_news():
     feeds = [
         "https://www.goal.com/en/feeds/news",
         "https://www.skysports.com/rss/12040",
         "https://www.theguardian.com/football/rss"
     ]
-    all_articles = []
+    data = []
     for url in feeds:
         try:
             f = feedparser.parse(url)
-            for entry in f.entries[:5]:
-                all_articles.append({
+            for entry in f.entries[:8]:
+                data.append({
                     "id": hashlib.md5(entry.link.encode()).hexdigest(),
                     "title": entry.title,
                     "link": entry.link,
-                    "source": url.split('/')[2],
-                    "published": entry.get('published', 'Recently')
+                    "source": url.split('/')[2]
                 })
         except: continue
-    return all_articles
+    return data
 
-def get_full_article_data(url):
+def get_content(url):
     try:
         r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(r.content, 'html.parser')
-        
-        # Extract image
-        img_tag = soup.find("meta", property="og:image")
-        img = img_tag["content"] if img_tag else None
-        
-        # Extract first 3 solid paragraphs for AI
+        img = soup.find("meta", property="og:image")
         paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 60]
-        text = " ".join(paras[:3])
-        return text, img
-    except:
-        return "", None
+        return " ".join(paras[:3]), (img["content"] if img else None)
+    except: return "", None
 
-# --- UI LAYOUT ---
+# --- UI MAIN ---
 st.title("⚽ Pro Soccer Scout AI")
-st.markdown("### Global Intelligence Aggregator")
 
-# Sidebar
-with st.sidebar:
-    st.header("Scout Controls")
-    if st.button("🔄 Refresh Global Feed"):
-        st.cache_data.clear()
-        st.rerun()
-    st.divider()
-    st.write("Using **Facebook BART-Large-CNN** for tactical summaries.")
+# Search Bar Fix
+search_query = st.text_input("🔍 Search for a team, player, or league (e.g. 'Arsenal' or 'La Liga')", "")
 
-# Initialize News
-news_feed = fetch_soccer_news()
+# Refresh Button
+if st.sidebar.button("🔄 Refresh Feed"):
+    st.cache_data.clear()
+    st.rerun()
 
-# Display News Cards
-for article in news_feed:
-    with st.container():
-        st.markdown(f"<span class='source-tag'>{article['source'].upper()}</span>", unsafe_allow_html=True)
-        st.subheader(article['title'])
+all_news = fetch_news()
+
+# Filter News based on search
+filtered_news = [n for n in all_news if search_query.lower() in n['title'].lower()] if search_query else all_news
+
+if not filtered_news:
+    st.warning("No news found for that search. Try something else!")
+
+for item in filtered_news:
+    with st.container(border=True):
+        st.markdown(f"**{item['source'].upper()}**")
+        st.subheader(item['title'])
         
-        col_act, col_link = st.columns([1, 4])
-        
-        # Action: Summarize
-        if col_act.button("✨ Analyze Story", key=article['id']):
-            with st.spinner("Scouting article content..."):
-                full_text, image_url = get_article_data = get_full_article_data(article['link'])
+        if st.button("✨ Analyze Story", key=item['id']):
+            with st.spinner("Analyzing..."):
+                text, img = get_content(item['link'])
+                if img: st.image(img, use_container_width=True)
                 
-                if image_url:
-                    st.image(image_url, use_container_width=True)
-                
-                if len(full_text) > 100:
-                    summary = query_ai(full_text)
-                    if summary:
-                        st.markdown(f"""
-                            <div class='report-box'>
-                                <strong>AI SCOUT SUMMARY:</strong><br>{summary}
-                            </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # Copy-Paste Section
-                        st.text_area("Shareable Text", 
-                                    value=f"🚨 FOOTBALL UPDATE: {article['title']}\n\n📝 AI SUMMARY: {summary}\n\n🔗 Full Story: {article['link']}",
-                                    height=100)
+                if len(text) > 100:
+                    report = query_ai(text)
+                    st.markdown(f"<div class='report-box'><strong>AI SUMMARY:</strong><br>{report}</div>", unsafe_allow_html=True)
                 else:
-                    st.warning("Could not retrieve enough content from this source to summarize.")
+                    st.warning("Article too short to summarize.")
         
-        col_link.markdown(f"<br>[Read Original Article]({article['link']})", unsafe_allow_html=True)
-        st.divider()
+        st.caption(f"[Read full story]({item['link']})")
