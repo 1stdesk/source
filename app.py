@@ -2,26 +2,27 @@ import streamlit as st
 import feedparser
 import requests
 from bs4 import BeautifulSoup
+from collections import Counter
 import re
 
 # --- CONFIG ---
-st.set_page_config(page_title="Pro Scout 20: Elite Edition", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="AI Newsroom: Multi-Source Compiler", page_icon="⚽", layout="wide")
 
+# --- STYLING ---
 st.markdown("""
     <style>
-    .main { background-color: #0e1117; }
-    .source-label { 
-        background-color: #2e7bcf; color: white; padding: 2px 8px; 
-        border-radius: 5px; font-size: 0.8rem; font-weight: bold;
+    .compiler-box { 
+        background-color: #001529; border: 2px solid #00ff41; 
+        padding: 25px; border-radius: 15px; margin-bottom: 30px;
     }
-    .card {
-        border: 1px solid #30363d; padding: 15px; border-radius: 10px;
-        background-color: #161b22; margin-bottom: 10px;
+    .source-pill {
+        background-color: #00ff41; color: black; padding: 2px 10px;
+        border-radius: 20px; font-size: 0.7rem; font-weight: bold; margin-right: 5px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- EXPANDED 20 SOURCES ---
+# --- 20 MASTER SOURCES ---
 MASTER_POOL = [
     ("Goal.com", "https://www.goal.com/en/feeds/news"),
     ("Sky Sports", "https://www.skysports.com/rss/12040"),
@@ -45,90 +46,91 @@ MASTER_POOL = [
     ("Daily Sun Soccer", "https://www.snl24.com/dailysun/sport/rss")
 ]
 
-def get_rich_content(url):
-    """Deep scrapes for high-volume content."""
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        r = requests.get(url, headers=headers, timeout=8)
-        soup = BeautifulSoup(r.content, 'html.parser')
-        
-        # Meta Data
-        img = soup.find("meta", property="og:image")
-        
-        # Content Extraction - grabs all significant paragraphs
-        paras = [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 80]
-        
-        # Clean up text
-        main_body = " ".join(paras[:6]) # Increased to 6 paragraphs for "more content"
-        bullets = paras[:5] # Grab first 5 for the FB post
-        
-        return {
-            "img": img["content"] if img else None,
-            "body": main_body,
-            "bullets": bullets
-        }
-    except:
-        return None
+# --- INTELLIGENCE FUNCTIONS ---
+def get_compiled_intel(urls):
+    """Scrapes multiple URLs and merges content into one block."""
+    combined_text = []
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    for url in urls[:3]: # Limit to top 3 sources to keep it fast
+        try:
+            r = requests.get(url, headers=headers, timeout=5)
+            soup = BeautifulSoup(r.content, 'html.parser')
+            paras = [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 100]
+            combined_text.extend(paras[:2])
+        except: continue
+    return combined_text
+
+def find_trending_topics(feed_items):
+    """Identifies common themes across all 20 sources."""
+    all_titles = " ".join([item['t'] for item in feed_items]).lower()
+    words = re.findall(r'\w+', all_titles)
+    # Filter out common 'stop words'
+    stop_words = {'the', 'and', 'for', 'with', 'after', 'says', 'over', 'man', 'set', 'league', 'football', 'soccer'}
+    meaningful_words = [w for w in words if len(w) > 3 and w not in stop_words]
+    return Counter(meaningful_words).most_common(5)
 
 # --- APP UI ---
-st.title("⚽ PRO SCOUT 20: GLOBAL HUB")
-st.write(f"Scanning **{len(MASTER_POOL)}** newsrooms for breaking updates...")
+st.title("⚽ AI MULTI-SOURCE COMPILER")
+st.subheader("Synthesizing 20 sources into unified social reports")
 
-if 'feed_cache' not in st.session_state:
-    with st.spinner("Initializing Global Feeds..."):
-        results = []
+if 'full_data' not in st.session_state:
+    with st.spinner("Analyzing Global Landscape..."):
+        all_news = []
         for name, url in MASTER_POOL:
             try:
                 f = feedparser.parse(url)
                 if f.entries:
-                    results.append({"s": name, "t": f.entries[0].title, "l": f.entries[0].link})
+                    all_news.append({"s": name, "t": f.entries[0].title, "l": f.entries[0].link})
             except: continue
-        st.session_state.feed_cache = results
+        st.session_state.full_data = all_news
 
-# Search bar to find specific players/teams in the 20 sources
-search = st.text_input("🔍 Search within these 20 sources...", "")
+# --- TRENDING SECTION ---
+trends = find_trending_topics(st.session_state.full_data)
+st.write("### 📈 Current Trending Topics")
+cols = st.columns(len(trends))
+for i, (word, count) in enumerate(trends):
+    if cols[i].button(f"{word.upper()} ({count} sources)"):
+        st.session_state.current_query = word
 
-# Display Logic
-for i, item in enumerate(st.session_state.feed_cache):
-    if search.lower() in item['t'].lower() or search.lower() in item['s'].lower():
-        with st.container():
-            st.markdown(f'<div class="card">', unsafe_allow_html=True)
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
-                st.markdown(f'<span class="source-label">{item["s"]}</span>', unsafe_allow_html=True)
-                st.subheader(item['t'])
-            
-            with col2:
-                if st.button("🔥 Generate Post", key=f"btn_{i}"):
-                    with st.spinner("Deep Scanning..."):
-                        data = get_rich_content(item['l'])
-                        if data:
-                            # Constructing the massive FB post
-                            bullet_str = "\n".join([f"📍 {b[:150]}..." for b in data['bullets']])
-                            fb_template = (
-                                f"🚨 BREAKING NEWS: {item['t'].upper()} 🚨\n\n"
-                                f"Huge developments coming out of {item['s']} today. "
-                                f"Here’s everything you need to know about this story:\n\n"
-                                f"{bullet_str}\n\n"
-                                f"🏟️ THE FULL SCOOP:\n{data['body'][:500]}...\n\n"
-                                f"👇 READ MORE HERE:\n{item['l']}\n\n"
-                                f"#Soccer #Football #TransferNews #{item['s'].replace(' ', '')} #MatchDay"
-                            )
-                            st.session_state[f"post_{i}"] = fb_template
-                            st.session_state[f"img_{i}"] = data['img']
-            
-            # Show results if generated
-            if f"post_{i}" in st.session_state:
-                res_c1, res_c2 = st.columns([1, 2])
-                with res_c1:
-                    if st.session_state[f"img_{i}"]:
-                        st.image(st.session_state[f"img_{i}"])
-                with res_c2:
-                    st.code(st.session_state[f"post_{i}"], language="markdown")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+# --- COMPILER ENGINE ---
+query = st.text_input("Enter a Player, Team, or Topic to Compile:", st.session_state.get('current_query', ''))
 
-if st.button("♻️ Refresh All 20 Sources"):
-    del st.session_state.feed_cache
-    st.rerun()
+if query:
+    matches = [item for item in st.session_state.full_data if query.lower() in item['t'].lower()]
+    
+    if matches:
+        st.success(f"Found {len(matches)} sources discussing '{query}'")
+        if st.button(f"🚀 COMPILE MASTER REPORT ON '{query.upper()}'"):
+            with st.spinner("Extracting and cross-referencing content..."):
+                sources_used = [m['s'] for m in matches]
+                links_used = [m['l'] for m in matches]
+                titles_used = [m['t'] for m in matches]
+                
+                deep_content = get_compiled_intel(links_used)
+                
+                # Create Compiled Facebook Post
+                source_tags = " ".join([f"#{s.replace(' ', '')}" for s in sources_used])
+                bullet_points = "\n".join([f"✅ {p[:180]}..." for p in deep_content[:5]])
+                
+                master_post = (
+                    f"🔥 MULTI-SOURCE UPDATE: {query.upper()} 🔥\n\n"
+                    f"We have analyzed reports from {len(matches)} major outlets including {', '.join(sources_used[:3])}.\n\n"
+                    f"📝 KEY COMPILATION:\n"
+                    f"{bullet_points}\n\n"
+                    f"🌐 CITED SOURCES:\n" + "\n".join([f"- {t}" for t in titles_used[:3]]) + 
+                    f"\n\n👉 Stay tuned for more compiled updates!\n\n"
+                    f"#SoccerNews #CompiledReport #FootballIntel {source_tags}"
+                )
+                
+                st.markdown('<div class="compiler-box">', unsafe_allow_html=True)
+                st.markdown("### 📋 Unified Social Media Post")
+                st.code(master_post, language="markdown")
+                st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.warning("No matches found in the current 20 sources for that topic.")
+
+# --- RAW FEED LIST ---
+st.write("---")
+st.write("### 🗄️ Raw Multi-Source Feed")
+for item in st.session_state.full_data:
+    st.markdown(f'<span class="source-pill">{item["s"]}</span> {item["t"]}', unsafe_allow_html=True)
