@@ -7,126 +7,119 @@ import time
 import random
 
 # --- CONFIG ---
-st.set_page_config(page_title="NEO-SCOUT // V10", page_icon="📡", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT // V11", page_icon="📡", layout="wide")
 
-# --- STYLING ---
+# --- STYLE ---
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
-.stApp { background-color: #050505; font-family: 'JetBrains Mono', monospace; }
-h1, h2, h3, p, span, div { color: #00ff41 !important; text-shadow: 0 0 5px #00ff41; }
-.stElementContainer div[data-testid="stVerticalBlockBorderWrapper"] {
-    background-color: #0a0a0a !important;
-    border: 1px solid #00ff41 !important;
-    box-shadow: 0 0 15px rgba(0,255,65,0.2);
-    padding: 20px; border-radius: 4px; margin-bottom: 20px;
-}
-.status-tag { font-size: 0.7rem; padding: 2px 6px; border: 1px solid #00ff41; margin-bottom: 10px; display: inline-block; }
-.char-counter { font-size: 0.8rem; color: #888 !important; text-align: right; }
+.stApp { background-color: #050505; }
+h1, h2, h3, p, span, div { color: #00ff41 !important; }
+.status-tag { font-size: 0.7rem; border: 1px solid #00ff41; padding: 2px 6px; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- REFRESH BUTTON ---
+# --- REFRESH ---
 if "refresh_key" not in st.session_state:
     st.session_state.refresh_key = 0
 
-col1, col2 = st.columns([1, 6])
-with col1:
-    if st.button("🔄 REFRESH"):
-        st.session_state.refresh_key += 1
-        st.cache_data.clear()
-        st.rerun()
+if st.button("🔄 REFRESH FEEDS"):
+    st.session_state.refresh_key += 1
+    st.cache_data.clear()
+    st.rerun()
 
-# --- SMART FALLBACK ---
-def smart_fallback_summary(text):
-    sentences = text.split('. ')
-    if len(sentences) < 3:
-        return text[:200]
+# --- SIMILARITY ---
+def is_similar(t1, t2):
+    ignore = {"the","and","to","in","of","for","on","with"}
+    s1 = set([w for w in t1.lower().split() if w not in ignore])
+    s2 = set([w for w in t2.lower().split() if w not in ignore])
+    return len(s1.intersection(s2)) >= 3
 
-    keywords = ["goal", "transfer", "win", "loss", "injury", "deal", "match"]
-    scored = []
+def find_related(main, all_items):
+    return [i for i in all_items if i["id"] != main["id"] and is_similar(main["title"], i["title"])][:5]
 
-    for s in sentences:
-        score = sum(1 for k in keywords if k in s.lower())
-        score += len(s) / 100
-        scored.append((score, s))
+# --- SCRAPER ---
+def scrape_intel(url):
+    try:
+        r = requests.get(url, timeout=6, headers={'User-Agent': 'Mozilla/5.0'})
+        soup = BeautifulSoup(r.content, 'html.parser')
+        img = soup.find("meta", property="og:image")
 
-    top = sorted(scored, reverse=True)[:3]
-    return ". ".join([s[1] for s in top]).strip() + "."
+        paras = [p.get_text().strip() for p in soup.find_all('p')]
+        paras = [p for p in paras if len(p) > 60]
 
-# --- FORMAT ---
-def format_summary_output(summary, title):
-    return f"""⚽ {title}
+        return " ".join(paras[:6]), (img["content"] if img else None)
+    except:
+        return "", None
 
-🔥 {summary}
-"""
+# --- MERGE ---
+def merge_articles(main, all_items):
+    related = find_related(main, all_items)
+
+    combined = ""
+    main_text, img = scrape_intel(main["link"])
+    combined += main_text
+
+    for r in related:
+        txt, _ = scrape_intel(r["link"])
+        combined += "\n" + txt
+
+    return combined, related, img
+
+# --- FALLBACK ---
+def smart_fallback(text):
+    s = text.split('. ')
+    return ". ".join(s[:3]) if len(s) >= 3 else text[:200]
 
 # --- AI ---
-def query_ai_deep(text, title=""):
-    API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-
+def query_ai(text, title=""):
     if "HF_TOKEN" not in st.secrets:
-        return format_summary_output(smart_fallback_summary(text), title)
+        return smart_fallback(text)
 
+    API = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
     headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
 
     prompt = f"""
-Summarize this football news article in 3 sharp sentences:
-1. Breaking news
-2. Key details
-3. Impact
+Combine multiple football news sources into one clean summary.
+
+Rules:
+- Max 3 sentences
+- Merge facts
+- Remove duplicates
+- Focus on confirmed info
 
 Title: {title}
 
-{text[:1200]}
+{text[:1500]}
 """
 
-    payload = {
-        "inputs": prompt,
-        "parameters": {"max_length": 140, "min_length": 60}
-    }
+    try:
+        r = requests.post(API, headers=headers, json={"inputs": prompt}, timeout=20)
+        res = r.json()
+        if isinstance(res, list):
+            return res[0]["summary_text"]
+    except:
+        pass
 
-    for wait in [3, 6, 10]:
-        try:
-            r = requests.post(API_URL, headers=headers, json=payload, timeout=20)
-            res = r.json()
-
-            if isinstance(res, list):
-                return format_summary_output(res[0]['summary_text'], title)
-
-            if "estimated_time" in res:
-                time.sleep(wait)
-
-        except:
-            continue
-
-    return format_summary_output(smart_fallback_summary(text), title)
+    return smart_fallback(text)
 
 @st.cache_data(ttl=3600)
 def cached_summary(text, title):
-    return query_ai_deep(text, title)
+    return query_ai(text, title)
 
 # --- TAGS ---
-def generate_viral_tags(title):
-    base = ["#Football", "#SoccerNews", "#Breaking", "#Sports"]
-    t = title.lower()
-
-    if "transfer" in t:
-        base += ["#TransferNews", "#HereWeGo"]
-    if "goal" in t:
-        base += ["#Goal", "#MatchDay"]
-    if "injury" in t:
-        base += ["#InjuryUpdate"]
-
-    return " ".join(random.sample(base, k=min(5, len(base))))
+def generate_tags(title):
+    base = ["#Football", "#SoccerNews", "#Breaking"]
+    if "transfer" in title.lower():
+        base += ["#TransferNews"]
+    return " ".join(random.sample(base, k=min(4, len(base))))
 
 # --- BREAKING ---
-def is_breaking_news(title):
-    return any(k in title.upper() for k in ["BREAKING", "CONFIRMED", "DONE DEAL"])
+def is_breaking(title):
+    return any(k in title for k in ["BREAKING", "CONFIRMED"])
 
-# --- 20 SOURCES ---
+# --- FEEDS (20) ---
 @st.cache_data(ttl=600)
-def get_live_stream(refresh_key):
+def get_news(key):
     feeds = [
         "https://www.goal.com/en/feeds/news",
         "https://www.skysports.com/rss/12040",
@@ -136,98 +129,73 @@ def get_live_stream(refresh_key):
         "https://talksport.com/football/feed/",
         "https://www.90min.com/rss",
         "https://www.fourfourtwo.com/rss",
-        "https://www.sportingnews.com/uk/rss",
-        "https://www.mirror.co.uk/sport/football/rss.xml",
-        "https://www.independent.co.uk/sport/football/rss",
-        "https://metro.co.uk/sport/football/feed/",
         "https://www.cbssports.com/rss/headlines/soccer/",
         "https://www.foxsports.com/soccer/rss",
-        "https://www.besoccer.com/rss/news",
+        "https://www.mirror.co.uk/sport/football/rss.xml",
+        "https://metro.co.uk/sport/football/feed/",
+        "https://www.independent.co.uk/sport/football/rss",
+        "https://www.sportingnews.com/uk/rss",
         "https://www.worldsoccertalk.com/feed/",
         "https://www.mlssoccer.com/rss",
         "https://www.laliga.com/rss",
         "https://www.premierleague.com/news/rss.xml",
-        "https://www.bundesliga.com/rss/news"
+        "https://www.bundesliga.com/rss/news",
+        "https://www.besoccer.com/rss/news"
     ]
 
-    stream = []
+    out = []
     for url in feeds:
         f = feedparser.parse(url)
-        for entry in f.entries[:4]:
-            stream.append({
-                "id": hashlib.md5(entry.link.encode()).hexdigest(),
-                "title": entry.title.upper(),
-                "link": entry.link,
-                "src": url.split('/')[2].upper()
+        for e in f.entries[:3]:
+            out.append({
+                "id": hashlib.md5(e.link.encode()).hexdigest(),
+                "title": e.title.upper(),
+                "link": e.link,
+                "src": url.split('/')[2]
             })
-    return stream
-
-# --- SCRAPER ---
-def scrape_intel(url):
-    try:
-        r = requests.get(url, timeout=6, headers={'User-Agent': 'Mozilla/5.0'})
-        soup = BeautifulSoup(r.content, 'html.parser')
-
-        img = soup.find("meta", property="og:image")
-
-        paras = [p.get_text().strip() for p in soup.find_all('p')]
-        paras = [p for p in paras if len(p) > 60 and "cookie" not in p.lower()]
-
-        return " ".join(paras[:6]), (img["content"] if img else None)
-
-    except:
-        return "", None
+    return out
 
 # --- UI ---
-st.title("📡 NEO-SCOUT // V10 ELITE")
+st.title("📡 NEO-SCOUT // V11 INTELLIGENCE CORE")
 
-news_stream = get_live_stream(st.session_state.refresh_key)
+news = get_news(st.session_state.refresh_key)
 
-for item in news_stream:
-    with st.container(border=True):
+for item in news:
+    with st.container():
 
-        st.markdown(f'<div class="status-tag">NODE_{item["src"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="status-tag">{item["src"]}</div>', unsafe_allow_html=True)
 
-        if is_breaking_news(item['title']):
-            st.error("🚨 BREAKING NEWS")
+        if is_breaking(item["title"]):
+            st.error("🚨 BREAKING")
 
-        st.subheader(item['title'])
+        st.subheader(item["title"])
 
-        if st.button("🔬 RUN INTEL", key=item['id']):
+        if st.button("🧠 MULTI-SOURCE INTEL", key=item["id"]):
 
-            with st.spinner(">> SCANNING DATA..."):
-                raw_text, image = scrape_intel(item['link'])
+            with st.spinner("AGGREGATING SOURCES..."):
 
-                if image:
-                    st.image(image, use_container_width=True)
+                merged_text, related, img = merge_articles(item, news)
+
+                if img:
+                    st.image(img)
 
                     try:
-                        img_data = requests.get(image).content
-                        st.download_button("⬇ DOWNLOAD IMAGE", img_data, file_name="news.jpg")
+                        st.download_button("DOWNLOAD IMAGE", requests.get(img).content)
                     except:
                         pass
 
-                if len(raw_text) > 100:
-                    summary = cached_summary(raw_text, item['title'])
-                    tags = generate_viral_tags(item['title'])
+                summary = cached_summary(merged_text, item["title"])
+                tags = generate_tags(item["title"])
 
-                    full_post = f"{summary}\n\n{tags}"
+                st.success(f"SOURCES USED: {1 + len(related)}")
 
-                    st.text_area(">> SOCIAL READY", value=full_post, height=200)
-                    st.code(full_post)
+                for r in related:
+                    st.caption(f"↳ {r['src']}")
 
-                    char_count = len(full_post)
+                full = f"⚽ {item['title']}\n\n{summary}\n\n{tags}"
 
-                    st.markdown(
-                        f'<div class="char-counter">CHARS: {char_count} | '
-                        f'X: {"✅" if char_count <= 280 else "❌"} | TIKTOK: ✅</div>',
-                        unsafe_allow_html=True
-                    )
-
-                else:
-                    st.error(">> DATA TOO SHORT")
-
-        st.markdown(f"[>> SOURCE LINK]({item['link']})")
+                st.text_area("OUTPUT", full, height=200)
+                st.code(full)
 
 st.markdown("---")
-st.write(">> SYSTEM ONLINE // NEO-SCOUT V10")
+st.write("SYSTEM ACTIVE // V11")
