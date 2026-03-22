@@ -1,3 +1,4 @@
 streamlit
 feedparser
 requests
+beautifulsoup4
