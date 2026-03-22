@@ -1,119 +1,136 @@
 import streamlit as st
-import feedparser
 import requests
+import feedparser
+import hashlib
 from bs4 import BeautifulSoup
+import time
 import random
 
-# --- CONFIG ---
-st.set_page_config(page_title="Pro Soccer Insider", page_icon="⚽", layout="wide")
+# --- FUTURISTIC UI CONFIG ---
+st.set_page_config(page_title="NEO-SCOUT // VIRAL_EDITION", page_icon="📡", layout="wide")
 
-# --- SOURCE POOL ---
-SOURCES = [
-    ("Goal.com", "https://www.goal.com/en/feeds/news"), ("Sky Sports", "https://www.skysports.com/rss/12040"),
-    ("BBC Sport", "http://newsrss.bbc.co.uk/rss/sportonline_uk_edition/football/rss.xml"), ("Transfermarkt", "https://www.transfermarkt.com/rss/news"),
-    ("ESPN FC", "https://www.espn.com/espn/rss/soccer/news"), ("The Guardian", "https://www.theguardian.com/football/rss"),
-    ("Marca", "https://e00-marca.uecdn.es/rss/en/index.xml"), ("Football Italia", "https://football-italia.net/feed/"),
-    ("The Athletic", "https://theathletic.com/rss"), ("CaughtOffside", "https://www.caughtoffside.com/feed/"),
-    ("Barca Universal", "https://barcauniversal.com/feed/"), ("This Is Anfield", "https://www.thisisanfield.com/feed/")
-]
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+    .stApp { background-color: #050505; font-family: 'JetBrains Mono', monospace; }
+    h1, h2, h3, p, span, div { color: #00ff41 !important; text-shadow: 0 0 5px #00ff41; }
+    .stElementContainer div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #0a0a0a !important;
+        border: 1px solid #00ff41 !important;
+        box-shadow: 0 0 15px rgba(0, 255, 65, 0.2);
+        padding: 20px; border-radius: 2px; margin-bottom: 20px;
+    }
+    .stButton>button {
+        background-color: transparent !important; color: #00ff41 !important;
+        border: 1px solid #00ff41 !important; font-family: 'JetBrains Mono', monospace;
+        text-transform: uppercase; letter-spacing: 2px; transition: 0.3s; border-radius: 0px;
+    }
+    .stButton>button:hover { background-color: #00ff41 !important; color: #000 !important; box-shadow: 0 0 20px #00ff41; }
+    .intel-box {
+        background-color: #001a00; border-left: 4px solid #00ff41;
+        padding: 15px; margin: 10px 0; font-size: 0.95rem; color: #d1ffd1 !important; line-height: 1.6;
+    }
+    .hashtag-cluster { color: #00d4ff !important; font-weight: bold; margin-top: 10px; font-size: 0.85rem; }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- QUEUE SYSTEM ---
-if 'source_queue' not in st.session_state:
-    all_s = SOURCES.copy()
-    random.shuffle(all_s)
-    st.session_state.source_queue = all_s
-    st.session_state.queue_index = 0
-
-def fetch_next_20():
-    if st.session_state.queue_index + 20 > len(st.session_state.source_queue):
-        random.shuffle(st.session_state.source_queue)
-        st.session_state.queue_index = 0
-    selected = st.session_state.source_queue[st.session_state.queue_index : st.session_state.queue_index + 20]
-    st.session_state.queue_index += 20
+# --- VIRAL HASHTAG ENGINE ---
+def generate_viral_tags(title):
+    """Generates a mix of trending TikTok, FB, and Podcast hashtags."""
+    base_tags = ["#SportsTok", "#FootballNews", "#SoccerDaily", "#GameChanger", "#SportsPodcast"]
+    viral_platforms = ["#ESPNPlus", "#FBPresents", "#ViralSports", "#NewHeights", "#PatMcAfeeShow"]
     
-    data = []
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    for name, url in selected:
+    # Contextual tags based on keywords
+    context_tags = []
+    if "TRANSFER" in title.upper(): context_tags.extend(["#TransferWindow", "#HereWeGo"])
+    if "GOAL" in title.upper() or "WIN" in title.upper(): context_tags.extend(["#Golazo", "#Winning"])
+    if "INJURY" in title.upper(): context_tags.extend(["#BreakingNews", "#FantasyFootball"])
+
+    # Combine and shuffle
+    all_tags = list(set(base_tags + viral_platforms + context_tags))
+    return " ".join(random.sample(all_tags, k=min(len(all_tags), 8)))
+
+# --- AI CORE ---
+def query_ai_deep(text):
+    API_URL = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn"
+    if "HF_TOKEN" not in st.secrets: return "ERROR: TOKEN_NOT_FOUND"
+    
+    headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
+    payload = {
+        "inputs": text[:1500],
+        "parameters": {"do_sample": False, "max_length": 180, "min_length": 90, "repetition_penalty": 1.3}
+    }
+    for i in range(3):
         try:
-            f = feedparser.parse(url)
-            if f.entries:
-                e = f.entries[0]
-                r = requests.get(e.link, headers=headers, timeout=1.5)
-                soup = BeautifulSoup(r.content, 'html.parser')
-                img = soup.find("meta", property="og:image")
-                img_url = img["content"] if img else "https://via.placeholder.com/400x225?text=Breaking+News"
-                data.append({"s": name, "t": e.title, "l": e.link, "img": img_url})
+            r = requests.post(API_URL, headers=headers, json=payload, timeout=15)
+            res = r.json()
+            if isinstance(res, dict) and "estimated_time" in res:
+                time.sleep(5); continue
+            return res[0]['summary_text']
         except: continue
-    return data
+    return "SYSTEM_TIMEOUT"
 
-def generate_insider_summary(url):
-    """Scrapes the article to create a context-heavy summary."""
+# --- DATA STREAM ---
+@st.cache_data(ttl=300)
+def get_live_stream():
+    feeds = ["https://www.goal.com/en/feeds/news", "https://www.skysports.com/rss/12040"]
+    stream = []
+    for url in feeds:
+        f = feedparser.parse(url)
+        for entry in f.entries[:6]:
+            stream.append({"id": hashlib.md5(entry.link.encode()).hexdigest(), 
+                           "title": entry.title.upper(), "link": entry.link, "src": url.split('/')[2].upper()})
+    return stream
+
+def scrape_intel(url):
     try:
-        r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+        r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(r.content, 'html.parser')
-        # Grab first 3 substantial paragraphs for context
-        paras = [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 80]
-        if len(paras) >= 2:
-            return f"{paras[0][:250]}... Additionally, reports suggest {paras[1][:200]}..."
-        return paras[0] if paras else "No deeper context found; primary report at source link."
-    except:
-        return "Tactical details are being updated in real-time."
+        img = soup.find("meta", property="og:image")
+        paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 60]
+        return " ".join(paras[:5]), (img["content"] if img else None)
+    except: return "", None
 
-# --- UI ---
-st.title("⚽ PRO SOCCER INSIDER")
-st.caption(f"Source Cycle: {st.session_state.queue_index}/{len(SOURCES)}")
+# --- MAIN INTERFACE ---
+st.title("📡 NEO-SCOUT // VIRAL_AGGREGATOR_V7")
 
-if 'visual_feed' not in st.session_state:
-    st.session_state.visual_feed = fetch_next_20()
+# Global Refresh
+if st.button("🔄 REFRESH_SYSTEM_FEED"):
+    st.cache_data.clear()
+    st.rerun()
 
-m_col, s_col = st.columns([4, 1.2])
+news_stream = get_live_stream()
 
-with m_col:
-    grid = st.columns(4)
-    for idx, item in enumerate(st.session_state.visual_feed):
-        with grid[idx % 4]:
-            st.markdown(f'''
-                <div style="background:#111; border-radius:10px; border:1px solid #333; margin-bottom:10px; height:370px; overflow:hidden;">
-                    <img src="{item['img']}" style="width:100%; height:160px; object-fit:cover;">
-                    <div style="padding:8px;">
-                        <p style="color:#00ff41; font-size:10px; font-weight:bold; margin:0;">{item['s'].upper()}</p>
-                        <p style="font-size:12px; font-weight:bold; color:white; margin-top:4px; height:50px; overflow:hidden;">{item['t']}</p>
-                        <a href="{item['l']}" target="_blank" style="color:#888; font-size:10px;">🔗 View Original</a>
-                    </div>
-                </div>
-            ''', unsafe_allow_html=True)
-            if st.button("🎤 DEEP SUMMARY", key=f"gen_{idx}", use_container_width=True):
-                st.session_state.active = item
-
-with s_col:
-    st.markdown("### 🔥 Market Trends")
-    for t in ["#HereWeGo", "#TransferMarket", "#FFP", "#UCL"]:
-        st.markdown(f'<div style="background:#222; padding:8px; border-radius:5px; margin-bottom:5px; border-left:3px solid #00ff41; font-size:12px;">{t}</div>', unsafe_allow_html=True)
-    if st.button("🔄 REFRESH FEED", use_container_width=True):
-        st.session_state.visual_feed = fetch_next_20()
-        st.rerun()
-
-# --- THE SUMMARY ENGINE ---
-if 'active' in st.session_state:
-    it = st.session_state.active
-    st.divider()
-    with st.spinner("Analyzing tactical radiography..."):
-        context_summary = generate_insider_summary(it['l'])
+for item in news_stream:
+    with st.container(border=True):
+        st.write(f"NODE: {item['src']}")
+        st.subheader(item['title'])
         
-        # PRO CONTENT TEMPLATE
-        insider_post = (
-            f"📰 **THE DEEP SCOOP: {it['t'].upper()}**\n"
-            f"**\"HERE WE GO\" ENERGY — MARKET ANALYSIS**\n\n"
-            f"🏆 **THE BREAKDOWN:**\n"
-            f"Understand the move: Reporting via **{it['s']}**, this is more than just a headline. We are seeing a strategic shift as clubs look to navigate Financial Fair Play while securing top-tier talent.\n\n"
-            f"⚽ **INSIDER SUMMARY:**\n"
-            f"{context_summary}\n\n"
-            f"📈 **MARKET VERDICT:**\n"
-            f"This is a statement of intent. Whether it's a swap deal or a direct buy, the tactical ceiling of the squad changes today. This is the move fans have been waiting for. 💎\n\n"
-            f"👇 **FULL RADIOGRAPHY & SOURCE:**\n"
-            f"{it['l']}\n\n"
-            f"What’s your take on this strategy? 👇 #{it['s'].replace(' ', '')} #FootballNews #FabrizioEnergy #Soccer"
-        )
+        if st.button("🔬 GENERATE_DEEP_REPORT", key=item['id']):
+            with st.spinner(">> DECRYPTING_AND_ANALYZING..."):
+                raw_text, image = scrape_intel(item['link'])
+                if image: st.image(image, use_container_width=True)
+                
+                if len(raw_text) > 150:
+                    summary = query_ai_deep(raw_text)
+                    hashtags = generate_viral_tags(item['title'])
+                    
+                    st.markdown(f"""
+                        <div class="intel-box">
+                            <strong>[AI_SCOUT_REPORT]</strong><br><br>
+                            {summary}<br><br>
+                            <div class="hashtag-cluster">{hashtags}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Ready for Social Media
+                    st.text_area(">> READY_FOR_UPLOAD:", 
+                                value=f"⚽ {item['title']}\n\n{summary}\n\n{hashtags}\n\nSource: {item['link']}", 
+                                height=150)
+                else:
+                    st.write(">> ERROR: INSUFFICIENT_DATA")
         
-        st.subheader("Insider Deep Scoop")
-        st.code(insider_post, language="markdown")
+        st.markdown(f"[>> ACCESS_SOURCE]({item['link']})")
+
+st.markdown("---")
+st.write(">> SYSTEM_ONLINE // END_OF_LINE")
