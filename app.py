@@ -5,131 +5,180 @@ import hashlib
 from bs4 import BeautifulSoup
 import time
 
-# --- CONFIG ---
-st.set_page_config(page_title="Soccer Scout AI v6.2", page_icon="⚽", layout="wide")
+# --- FUTURISTIC UI CONFIG ---
+st.set_page_config(page_title="NEO-SCOUT v7.0", page_icon="📡", layout="wide")
 
-# --- STYLING ---
+# Custom CSS for Futuristic/Terminal look
 st.markdown("""
     <style>
-    .main { background-color: #0d1117; color: #c9d1d9; }
-    .stButton>button { 
-        width: 100%; border-radius: 8px; height: 3.5em; 
-        background-color: #238636; color: white; font-weight: bold;
-        border: none; transition: 0.3s;
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+
+    /* Global Background & Font */
+    .stApp {
+        background-color: #050505;
+        font-family: 'JetBrains Mono', monospace;
     }
-    .stButton>button:hover { background-color: #2ea043; border: 1px solid white; }
-    .report-box { 
-        background-color: #161b22; padding: 25px; 
-        border-radius: 12px; border: 1px solid #30363d;
-        line-height: 1.7; color: #e6edf3; font-size: 1.05rem;
+
+    /* Titles and Headers */
+    h1, h2, h3, p, span, div {
+        color: #00ff41 !important; /* Matrix Green */
+        text-shadow: 0 0 5px #00ff41;
+    }
+
+    /* Futuristic Cards */
+    .stElementContainer div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #0a0a0a !important;
+        border: 1px solid #00ff41 !important;
+        box-shadow: 0 0 15px rgba(0, 255, 65, 0.2);
+        padding: 20px;
+        border-radius: 2px;
+        margin-bottom: 20px;
+    }
+
+    /* Terminal-style Buttons */
+    .stButton>button {
+        background-color: transparent !important;
+        color: #00ff41 !important;
+        border: 1px solid #00ff41 !important;
+        font-family: 'JetBrains Mono', monospace;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        transition: 0.3s;
+        border-radius: 0px;
+    }
+
+    .stButton>button:hover {
+        background-color: #00ff41 !important;
+        color: #000 !important;
+        box-shadow: 0 0 20px #00ff41;
+    }
+
+    /* Deep Intel Box */
+    .intel-box {
+        background-color: #001a00;
+        border-left: 4px solid #00ff41;
+        padding: 15px;
+        margin: 10px 0;
+        font-size: 0.95rem;
+        color: #d1ffd1 !important;
+        line-height: 1.6;
+    }
+
+    /* Input Fields */
+    .stTextInput input {
+        background-color: #000 !important;
+        color: #00ff41 !important;
+        border: 1px solid #00ff41 !important;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- DEEP AI LOGIC (BART-LARGE-CNN) ---
+# --- AI CORE (Deep Intel Parameters) ---
 def query_ai_deep(text):
-    """Sends text to the New Router API with 'Deep' parameter tuning."""
     API_URL = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn"
     
     if "HF_TOKEN" not in st.secrets:
-        st.error("Missing HF_TOKEN in Secrets!")
-        return None
+        return "CRITICAL ERROR: ACCESS_TOKEN_NOT_FOUND"
     
     headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
-    
-    # DEEP SETTINGS: 
-    # repetition_penalty prevents looping. 
-    # length_penalty 2.0 encourages more detail.
     payload = {
-        "inputs": text[:1500], 
+        "inputs": text[:1500],
         "parameters": {
             "do_sample": False,
-            "max_length": 180,  # Keeps it well under 200 words
-            "min_length": 80,   # Ensures it's not too short/shallow
-            "repetition_penalty": 1.2,
-            "length_penalty": 2.0 
+            "max_length": 180,
+            "min_length": 90,
+            "repetition_penalty": 1.3,
+            "length_penalty": 1.5
         }
     }
 
     for i in range(3):
         try:
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=20)
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
             result = response.json()
-
             if isinstance(result, dict) and "estimated_time" in result:
-                st.info(f"⏳ AI is analyzing deeply... (Wait {int(result['estimated_time'])}s)")
-                time.sleep(8)
+                time.sleep(5)
                 continue
-            
-            if isinstance(result, list) and len(result) > 0:
-                return result[0]['summary_text']
-            
-            return f"⚠️ API Error: {result}"
-        except Exception as e:
-            if i == 2: return f"❌ Timeout: {e}"
-            time.sleep(2)
-    return "😴 AI is resting. Try again in 10s."
+            return result[0]['summary_text']
+        except:
+            continue
+    return "SYSTEM_TIMEOUT: MODEL_FAILURE"
 
-# --- DATA FUNCTIONS ---
-def get_soccer_news():
-    feeds = ["https://www.goal.com/en/feeds/news", "https://www.skysports.com/rss/12040", "https://www.theguardian.com/football/rss"]
-    articles = []
+# --- DATA STREAM ---
+@st.cache_data(ttl=300)
+def get_live_stream():
+    feeds = [
+        "https://www.goal.com/en/feeds/news",
+        "https://www.skysports.com/rss/12040",
+        "https://www.theguardian.com/football/rss"
+    ]
+    stream = []
     for url in feeds:
         try:
             f = feedparser.parse(url)
-            for entry in f.entries[:5]:
-                articles.append({
+            for entry in f.entries[:6]:
+                stream.append({
                     "id": hashlib.md5(entry.link.encode()).hexdigest(),
-                    "title": entry.title,
+                    "title": entry.title.upper(),
                     "link": entry.link,
-                    "source": url.split('/')[2]
+                    "src": url.split('/')[2].upper()
                 })
         except: continue
-    return articles
+    return stream
 
-def fetch_article_body(url):
+def scrape_intel(url):
     try:
         r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(r.content, 'html.parser')
         img = soup.find("meta", property="og:image")
-        # Grab more paragraphs for a "Deeper" context
-        paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 70]
+        paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 60]
         return " ".join(paras[:5]), (img["content"] if img else None)
     except: return "", None
 
-# --- UI ---
-st.title("⚽ Pro Scout AI: Deep Intel")
+# --- MAIN INTERFACE ---
+st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_V7")
+st.markdown("---")
 
-if 'news_data' not in st.session_state:
-    st.session_state.news_data = get_soccer_news()
+# Refresh Control
+col_header, col_ref = st.columns([5, 1])
+with col_ref:
+    if st.button("🔄 REFRESH_LIST"):
+        st.cache_data.clear()
+        st.rerun()
 
-# Search Feature
-query = st.text_input("🔍 Search Teams or Players", "").lower()
+# Search Buffer
+search_buf = st.text_input(">> INITIALIZE_FILTER_QUERY:", "").upper()
 
-for item in st.session_state.news_data:
-    if query and query not in item['title'].lower():
-        continue
-        
+# Load Data
+news_stream = get_live_stream()
+filtered_stream = [n for n in news_stream if search_buf in n['title']] if search_buf else news_stream
+
+# Display Loop
+for item in filtered_stream:
     with st.container(border=True):
-        st.caption(item['source'].upper())
+        st.write(f"SOURCE_NODE: {item['src']}")
         st.subheader(item['title'])
         
-        if st.button("🔬 RUN DEEP ANALYSIS", key=item['id']):
-            with st.spinner("AI performing deep tactical summary..."):
-                text, img = fetch_article_body(item['link'])
-                if img: st.image(img, use_container_width=True)
-                
-                if len(text) > 200:
-                    summary = query_ai_deep(text)
-                    st.markdown(f"""
-                        <div class="report-box">
-                            <strong>TACTICAL REPORT:</strong><br><br>{summary}
-                        </div>
-                    """, unsafe_allow_html=True)
+        c1, c2 = st.columns([1, 4])
+        with c1:
+            if st.button("RUN_DEEP_INTEL", key=item['id']):
+                with st.spinner(">> DECRYPTING_AND_SUMMARIZING..."):
+                    raw_text, image = scrape_intel(item['link'])
+                    if image: st.image(image, use_container_width=True)
                     
-                    # Social Share Copy
-                    st.text_area("Share this Report", f"⚽ {item['title']}\n\n{summary}\n\nFull story: {item['link']}", height=120)
-                else:
-                    st.error("Insufficient source data for a deep summary.")
+                    if len(raw_text) > 200:
+                        report = query_ai_deep(raw_text)
+                        st.markdown(f"""
+                            <div class="intel-box">
+                                <strong>[AI_SCOUT_DEEP_REPORT]</strong><br><br>
+                                {report}
+                            </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.write(">> ERROR: DATA_PACKET_TOO_SMALL")
         
-        st.markdown(f"[Source Article]({item['link']})")
+        with c2:
+            st.markdown(f"[>> ACCESS_FULL_LINK]({item['link']})")
+
+st.markdown("---")
+st.write(">> END_OF_STREAM")
