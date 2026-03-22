@@ -2,118 +2,109 @@ import streamlit as st
 import feedparser
 import requests
 from bs4 import BeautifulSoup
-import time
+import re
 
-# --- CONFIG & STYLING ---
-st.set_page_config(page_title="Pro Soccer Scout - ALL SOURCES", page_icon="⚽", layout="wide")
+# --- CONFIG ---
+st.set_page_config(page_title="Pro Scout: Content Max", page_icon="⚽", layout="wide")
 
+# --- STYLING (Dark Mode Professional) ---
 st.markdown("""
     <style>
-    .main { background-color: #050505; color: #e0e0e0; }
-    [data-testid="stMetricValue"] { font-size: 1.5rem; color: #00ff41; }
-    .source-header { 
-        background: linear-gradient(90deg, #1e1e1e, #000);
-        padding: 10px; border-radius: 5px; border-left: 5px solid #00ff41;
-        margin-bottom: 15px; font-weight: bold;
+    .report-box { 
+        background-color: #111; padding: 20px; border-radius: 10px; 
+        border: 1px solid #00ff41; margin-bottom: 25px;
     }
-    .news-item { border-bottom: 1px solid #333; padding: 10px 0; }
-    .news-link { color: #00ff41; text-decoration: none; font-size: 1.1rem; }
-    .news-link:hover { text-decoration: underline; color: #ffffff; }
+    .stCode { background-color: #000 !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- COMPLETE SOURCE LIST ---
 MASTER_POOL = [
     ("Goal.com", "https://www.goal.com/en/feeds/news"),
     ("Sky Sports", "https://www.skysports.com/rss/12040"),
     ("BBC Sport", "http://newsrss.bbc.co.uk/rss/sportonline_uk_edition/football/rss.xml"),
     ("Soccer Laduma", "https://www.snl24.com/soccerladuma/rss"),
-    ("KickOff", "https://www.snl24.com/kickoff/rss"),
-    ("ESPN FC", "https://www.espn.com/espn/rss/soccer/news"),
     ("Transfermarkt", "https://www.transfermarkt.com/rss/news"),
+    ("ESPN FC", "https://www.espn.com/espn/rss/soccer/news"),
     ("The Guardian", "https://www.theguardian.com/football/rss"),
     ("90min", "https://www.90min.com/posts.rss"),
-    ("CaughtOffside", "https://www.caughtoffside.com/feed/"),
     ("Marca", "https://e00-marca.uecdn.es/rss/en/index.xml"),
-    ("AS English", "https://en.as.com/rss/en/football/index.xml"),
-    ("Daily Mail", "https://www.dailymail.co.uk/sport/football/index.rss"),
-    ("Sowetan Live", "https://www.sowetanlive.co.za/sport/soccer/rss"),
-    ("Daily Sun", "https://www.snl24.com/dailysun/sport/rss"),
-    ("Football Italia", "https://football-italia.net/feed/"),
-    ("TEAMtalk", "https://www.teamtalk.com/feed"),
-    ("Ghana Soccernet", "https://ghanasoccernet.com/feed"),
-    ("World Soccer", "https://www.worldsoccer.com/feed"),
-    ("FourFourTwo", "https://www.fourfourtwo.com/rss.xml")
+    ("Football Italia", "https://football-italia.net/feed/")
 ]
 
-# --- CORE FUNCTIONS ---
-def fetch_all_sources():
-    """Fetches the latest headline from EVERY source."""
-    all_data = []
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    for idx, (name, url) in enumerate(MASTER_POOL):
-        status_text.text(f"Scanning {name}...")
-        try:
-            feed = feedparser.parse(url)
-            if feed.entries:
-                entry = feed.entries[0]
-                all_data.append({
-                    "source": name,
-                    "title": entry.title,
-                    "link": entry.link,
-                    "date": entry.get('published', 'Recently')
-                })
-        except:
-            continue
-        progress_bar.progress((idx + 1) / len(MASTER_POOL))
-    
-    status_text.empty()
-    progress_bar.empty()
-    return all_data
-
-# --- APP LAYOUT ---
-st.title("⚽ The Full Scout Dashboard")
-st.caption(f"Currently monitoring **{len(MASTER_POOL)}** global sources.")
-
-# Sidebar Controls
-with st.sidebar:
-    st.header("Settings")
-    view_mode = st.radio("Display Mode", ["List View", "Compact Grid"])
-    if st.button("🚀 SYNC ALL SOURCES"):
-        st.session_state.all_news = fetch_all_sources()
-
-# Initialize session state
-if 'all_news' not in st.session_state:
-    st.session_state.all_news = fetch_all_sources()
-
-# --- DISPLAY LOGIC ---
-if view_mode == "List View":
-    for item in st.session_state.all_news:
-        st.markdown(f'<div class="source-header">{item["source"]}</div>', unsafe_allow_html=True)
-        st.markdown(f'''
-            <div class="news-item">
-                <a class="news-link" href="{item['link']}" target="_blank">{item['title']}</a><br>
-                <small style="color: #888;">{item['date']}</small>
-            </div>
-        ''', unsafe_allow_html=True)
+# --- NEW: DEEP CONTENT EXTRACTION ---
+def get_deep_content(url):
+    """Extracts a larger chunk of text and identifies key entities."""
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        r = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(r.content, 'html.parser')
         
-        # Generator Button for this specific item
-        if st.button(f"Generate Content for {item['source']}", key=item['source']):
-            st.success(f"Context: {item['title']}. Ready to post to Social Media!")
-        st.write("---")
+        # Get image
+        img = soup.find("meta", property="og:image")
+        img_url = img["content"] if img else None
+        
+        # Get all meaningful paragraphs
+        paragraphs = [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 100]
+        
+        # Create a "Mega Summary" (first 4-5 paragraphs)
+        full_text = " ".join(paragraphs[:5])
+        
+        # Clean up text (remove extra whitespace)
+        full_text = re.sub(r'\s+', ' ', full_text)
+        
+        return {"img": img_url, "content": full_text, "bullets": paragraphs[:4]}
+    except Exception as e:
+        return None
 
-else:
-    # Compact Grid View
-    cols = st.columns(3)
-    for idx, item in enumerate(st.session_state.all_news):
-        with cols[idx % 3]:
-            with st.container(border=True):
-                st.markdown(f"**{item['source']}**")
-                st.write(item['title'])
-                st.page_link(item['link'], label="Read Story", icon="🔗")
+# --- APP INTERFACE ---
+st.title("⚽ High-Content Soccer Aggregator")
+st.subheader("Deep-scanned news for detailed Facebook updates")
+
+if 'full_feed' not in st.session_state:
+    with st.spinner("Syncing all major networks..."):
+        feeds = []
+        for name, url in MASTER_POOL:
+            f = feedparser.parse(url)
+            if f.entries:
+                feeds.append({"s": name, "t": f.entries[0].title, "l": f.entries[0].link})
+        st.session_state.full_feed = feeds
+
+# Display all sources
+for i, item in enumerate(st.session_state.full_feed):
+    with st.expander(f"📰 {item['s']}: {item['t']}", expanded=False):
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.write(f"**Source:** {item['s']}")
+            if st.button(f"🔍 Deep Scan & Generate", key=f"btn_{i}"):
+                with st.spinner("Extracting detailed intel..."):
+                    data = get_deep_content(item['l'])
+                    if data:
+                        # Build the Content-Heavy Facebook Post
+                        bullet_points = "\n".join([f"🔹 {b[:120]}..." for b in data['bullets']])
+                        
+                        rich_fb_post = (
+                            f"📢 **BIG READ: {item['t'].upper()}** 📢\n\n"
+                            f"The latest from {item['s']} is making waves in the football world. "
+                            f"Here is the detailed breakdown of what's happening right now:\n\n"
+                            f"{bullet_points}\n\n"
+                            f"🤔 What’s your take on this move? Drop a comment below! 👇\n\n"
+                            f"Full Story here: {item['l']}\n\n"
+                            f"#FootballNews #SoccerUpdate #TransferMarket #{item['s'].replace('.','')}"
+                        )
+                        
+                        st.session_state[f"post_{i}"] = rich_fb_post
+                        st.session_state[f"img_{i}"] = data['img']
+        
+        with col2:
+            if f"post_{i}" in st.session_state:
+                st.image(st.session_state[f"img_{i}"], use_container_width=True)
+                st.markdown("**Professional Facebook Copy:**")
+                st.code(st.session_state[f"post_{i}"], language="markdown")
+            else:
+                st.info("Click 'Deep Scan' to generate long-form content.")
 
 # --- FOOTER ---
-st.markdown("---")
-st.info("💡 **Pro Tip:** Use the 'Sync' button in the sidebar to get the absolute latest updates from all 20 servers.")
+if st.button("♻️ Refresh All Sources"):
+    del st.session_state.full_feed
+    st.rerun()
