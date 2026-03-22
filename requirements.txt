@@ -1,8 +1,6 @@
+streamlit
+transformers[torch]
+torch
+feedparser
 requests
 beautifulsoup4
-feedparser
-PyQt6
-pillow
-transformers
-torch
-sentencepiece
