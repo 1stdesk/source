@@ -1,1 +1,6 @@
-
+https://www.goal.com/en/feeds/news
+https://www.skysports.com/rss/12040
+https://push.api.bbci.co.uk/morph/items?page=1&limit=10&feed=football
+https://www.espn.com/espn/rss/soccer/news
+https://www.theguardian.com/football/rss
+https://football-italia.net/feed/
