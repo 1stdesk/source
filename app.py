@@ -2,37 +2,31 @@ import streamlit as st
 import feedparser
 import requests
 from bs4 import BeautifulSoup
-import random
+import time
 
 # --- CONFIG & STYLING ---
-st.set_page_config(page_title="Pro Soccer Scout AI v2", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="Pro Soccer Scout - ALL SOURCES", page_icon="⚽", layout="wide")
 
 st.markdown("""
     <style>
-    .main { background-color: #0d1117; color: #c9d1d9; }
-    .stTabs [data-baseweb="tab-list"] { gap: 20px; }
-    .stTabs [data-baseweb="tab"] { 
-        height: 50px; background-color: #161b22; border-radius: 10px; color: white; 
+    .main { background-color: #050505; color: #e0e0e0; }
+    [data-testid="stMetricValue"] { font-size: 1.5rem; color: #00ff41; }
+    .source-header { 
+        background: linear-gradient(90deg, #1e1e1e, #000);
+        padding: 10px; border-radius: 5px; border-left: 5px solid #00ff41;
+        margin-bottom: 15px; font-weight: bold;
     }
-    .stTabs [aria-selected="true"] { background-color: #238636; color: white; font-weight: bold; }
-    .news-card { 
-        background-color: #161b22; padding: 25px; border-radius: 12px; 
-        border: 1px solid #30363d; margin-bottom: 25px;
-        transition: transform 0.2s;
-    }
-    .news-card:hover { border-color: #238636; transform: translateY(-2px); }
-    .source-tag { color: #58a6ff; font-weight: bold; font-size: 0.85rem; margin-bottom: 10px; }
-    .sentiment-tag { float: right; font-size: 0.75rem; padding: 2px 8px; border-radius: 5px; }
-    .headline-link { color: #f0f6fc; font-weight: 600; text-decoration: none; font-size: 1.3rem; }
-    .headline-link:hover { color: #238636; }
+    .news-item { border-bottom: 1px solid #333; padding: 10px 0; }
+    .news-link { color: #00ff41; text-decoration: none; font-size: 1.1rem; }
+    .news-link:hover { text-decoration: underline; color: #ffffff; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- SOURCE POOL ---
+# --- COMPLETE SOURCE LIST ---
 MASTER_POOL = [
     ("Goal.com", "https://www.goal.com/en/feeds/news"),
     ("Sky Sports", "https://www.skysports.com/rss/12040"),
-    ("BBC Sport", "https://push.api.bbci.co.uk/morph/items?page=1&limit=10&feed=football"),
+    ("BBC Sport", "http://newsrss.bbc.co.uk/rss/sportonline_uk_edition/football/rss.xml"),
     ("Soccer Laduma", "https://www.snl24.com/soccerladuma/rss"),
     ("KickOff", "https://www.snl24.com/kickoff/rss"),
     ("ESPN FC", "https://www.espn.com/espn/rss/soccer/news"),
@@ -44,100 +38,82 @@ MASTER_POOL = [
     ("AS English", "https://en.as.com/rss/en/football/index.xml"),
     ("Daily Mail", "https://www.dailymail.co.uk/sport/football/index.rss"),
     ("Sowetan Live", "https://www.sowetanlive.co.za/sport/soccer/rss"),
+    ("Daily Sun", "https://www.snl24.com/dailysun/sport/rss"),
     ("Football Italia", "https://football-italia.net/feed/"),
     ("TEAMtalk", "https://www.teamtalk.com/feed"),
-    ("Ghana Soccernet", "https://ghanasoccernet.com/feed")
+    ("Ghana Soccernet", "https://ghanasoccernet.com/feed"),
+    ("World Soccer", "https://www.worldsoccer.com/feed"),
+    ("FourFourTwo", "https://www.fourfourtwo.com/rss.xml")
 ]
 
-# --- UTILITY FUNCTIONS ---
-def get_sentiment(text):
-    """Simple keyword-based sentiment analysis."""
-    hot_words = ['deal', 'official', 'winner', 'huge', 'breaking', 'signed', 'victory']
-    sad_words = ['injury', 'lost', 'out', 'defeat', 'crisis', 'sacked', 'dropped']
-    text = text.lower()
-    if any(w in text for w in hot_words): return "🔥 HOT"
-    if any(w in text for w in sad_words): return "⚠️ CRITICAL"
-    return "ℹ️ NEUTRAL"
-
-def get_scout_report(url):
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        r = requests.get(url, headers=headers, timeout=6)
-        soup = BeautifulSoup(r.content, 'html.parser')
-        img = soup.find("meta", property="og:image")
-        paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 90]
-        summary = " ".join(paras[:2]) if paras else "Full story available at the source link."
-        return {"img": img["content"] if img else None, "text": summary}
-    except:
-        return None
-
-def fetch_stories():
-    random_sources = random.sample(MASTER_POOL, min(len(MASTER_POOL), 20))
-    results = []
-    for name, url in random_sources:
+# --- CORE FUNCTIONS ---
+def fetch_all_sources():
+    """Fetches the latest headline from EVERY source."""
+    all_data = []
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for idx, (name, url) in enumerate(MASTER_POOL):
+        status_text.text(f"Scanning {name}...")
         try:
-            f = feedparser.parse(url)
-            if f.entries:
-                entry = f.entries[0]
-                results.append({
-                    's': name, 
-                    't': entry.title, 
-                    'l': entry.link,
-                    'sent': get_sentiment(entry.title)
+            feed = feedparser.parse(url)
+            if feed.entries:
+                entry = feed.entries[0]
+                all_data.append({
+                    "source": name,
+                    "title": entry.title,
+                    "link": entry.link,
+                    "date": entry.get('published', 'Recently')
                 })
-        except: continue
-    return results
-
-# --- SIDEBAR FILTERS ---
-st.sidebar.title("🔍 Scout Filters")
-search_query = st.sidebar.text_input("Search Players or Teams", "")
-source_filter = st.sidebar.multiselect("Filter by Source", [s[0] for s in MASTER_POOL])
+        except:
+            continue
+        progress_bar.progress((idx + 1) / len(MASTER_POOL))
+    
+    status_text.empty()
+    progress_bar.empty()
+    return all_data
 
 # --- APP LAYOUT ---
-tab1, tab2 = st.tabs(["📢 Smart News Feed", "💬 AI Scout Chat"])
+st.title("⚽ The Full Scout Dashboard")
+st.caption(f"Currently monitoring **{len(MASTER_POOL)}** global sources.")
 
-with tab1:
-    st.title("⚽ GLOBAL SOCCER AGGREGATOR PRO")
-    
-    if st.button("🔄 REFRESH SCOUT REPORT"):
-        st.session_state.news_feed = fetch_stories()
+# Sidebar Controls
+with st.sidebar:
+    st.header("Settings")
+    view_mode = st.radio("Display Mode", ["List View", "Compact Grid"])
+    if st.button("🚀 SYNC ALL SOURCES"):
+        st.session_state.all_news = fetch_all_sources()
 
-    if 'news_feed' not in st.session_state:
-        st.session_state.news_feed = fetch_stories()
+# Initialize session state
+if 'all_news' not in st.session_state:
+    st.session_state.all_news = fetch_all_sources()
 
-    # Filter Logic
-    display_feed = st.session_state.news_feed
-    if search_query:
-        display_feed = [n for n in display_feed if search_query.lower() in n['t'].lower()]
-    if source_filter:
-        display_feed = [n for n in display_feed if n['s'] in source_filter]
-
-    for i, item in enumerate(display_feed, 1):
+# --- DISPLAY LOGIC ---
+if view_mode == "List View":
+    for item in st.session_state.all_news:
+        st.markdown(f'<div class="source-header">{item["source"]}</div>', unsafe_allow_html=True)
         st.markdown(f'''
-            <div class="news-card">
-                <span class="sentiment-tag">{item['sent']}</span>
-                <div class="source-tag">{item["s"]}</div>
-                <a href="{item["l"]}" target="_blank" class="headline-link">{item["t"]}</a>
+            <div class="news-item">
+                <a class="news-link" href="{item['link']}" target="_blank">{item['title']}</a><br>
+                <small style="color: #888;">{item['date']}</small>
             </div>
         ''', unsafe_allow_html=True)
         
-        # Action Buttons
-        col_btn, col_empty = st.columns([1, 3])
-        if col_btn.button(f"✨ Prep FB Post #{i}", key=f"btn_{i}"):
-            with st.spinner("Analyzing news context..."):
-                data = get_scout_report(item['l'])
-                if data:
-                    fb_tags = f"#Soccer #Football #TransferNews #{item['s'].replace(' ', '')}"
-                    fb_text = f"🚨 {item['sent']} UPDATE: {item['t'].upper()} 🚨\n\n⚽ THE SCOOP: {data['text']}\n\n🔗 Full story: {item['l']}\n\n{fb_tags}"
-                    
-                    st.info("Post Ready! Copy the text below:")
-                    st.code(fb_text, language="markdown") # Better for copying
-                    
-                    if data['img']:
-                        st.image(data['img'], width=400)
-                else:
-                    st.error("Could not fetch a deep summary for this link.")
+        # Generator Button for this specific item
+        if st.button(f"Generate Content for {item['source']}", key=item['source']):
+            st.success(f"Context: {item['title']}. Ready to post to Social Media!")
+        st.write("---")
 
-with tab2:
-    st.header("🤖 AI Scout Assistant")
-    # (Same chat logic as your
+else:
+    # Compact Grid View
+    cols = st.columns(3)
+    for idx, item in enumerate(st.session_state.all_news):
+        with cols[idx % 3]:
+            with st.container(border=True):
+                st.markdown(f"**{item['source']}**")
+                st.write(item['title'])
+                st.page_link(item['link'], label="Read Story", icon="🔗")
+
+# --- FOOTER ---
+st.markdown("---")
+st.info("💡 **Pro Tip:** Use the 'Sync' button in the sidebar to get the absolute latest updates from all 20 servers.")
