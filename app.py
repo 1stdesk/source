@@ -23,25 +23,23 @@ BIG_POOL = [
     ("TalkSport", "https://talksport.com/football/feed/"), ("OneFootball", "https://onefootball.com/en/rss"),
     ("Football.London", "https://www.football.london/rss.xml"), ("EuroSport", "https://www.eurosport.com/football/rss.xml"),
     ("Sporting News", "https://www.sportingnews.com/us/rss/soccer"), ("Independent", "https://www.independent.co.uk/sport/football/rss"),
-    ("Caught Offside", "https://www.caughtoffside.com/feed/"), ("Tribal Football", "https://www.tribalfootball.com/rss.xml"),
-    ("World Football Index", "https://worldfootballindex.com/feed/"), ("Irish Times", "https://www.irishtimes.com/cmlink/news-soccer-1.1319114"),
+    ("Tribal Football", "https://www.tribalfootball.com/rss.xml"), ("World Football Index", "https://worldfootballindex.com/feed/"),
     ("Standard", "https://www.standard.co.uk/sport/football/rss"), ("Daily Star", "https://www.dailystar.co.uk/sport/football/rss"),
-    ("Wales Online", "https://www.walesonline.co.uk/sport/football/rss.xml"), ("Football365", "https://www.football365.com/feed"),
-    ("Daily Express", "https://www.express.co.uk/posts/rss/65/football"), ("Soccernet NG", "https://soccernet.ng/feed/"),
-    ("Brila FM", "https://www.brila.net/feed/"), ("CAF Online", "https://www.cafonline.com/rss"),
-    ("BVB World", "https://bvbwld.de/feed/"), ("Barca Universal", "https://barcauniversal.com/feed/"),
+    ("Football365", "https://www.football365.com/feed"), ("Daily Express", "https://www.express.co.uk/posts/rss/65/football"),
+    ("Soccernet NG", "https://soccernet.ng/feed/"), ("Brila FM", "https://www.brila.net/feed/"),
+    ("CAF Online", "https://www.cafonline.com/rss"), ("Barca Universal", "https://barcauniversal.com/feed/"),
     ("Juve FC", "https://www.juvefc.com/feed/"), ("Roma Press", "https://romapress.net/feed/"),
     ("The Mag", "https://www.themag.co.uk/feed/"), ("Arseblog", "https://arseblog.news/feed/"),
     ("This Is Anfield", "https://www.thisisanfield.com/feed/"), ("ToffeeWeb", "https://www.toffeeweb.com/rss/news.xml"),
-    ("SBNation", "https://www.sbnation.com/rss/current.xml"), ("Daily Record", "https://www.dailyrecord.co.uk/sport/football/rss.xml")
+    ("Daily Record", "https://www.dailyrecord.co.uk/sport/football/rss.xml")
 ]
 
 def get_new_batch():
-    """Picks 20 sources that are NOT currently shown."""
+    """Picks 20 sources that are NOT currently shown to ensure variety."""
     current_names = [item['s'] for item in st.session_state.get('visual_feed', [])]
     available_pool = [s for s in BIG_POOL if s[0] not in current_names]
     
-    # If we run out of new sources, reset the pool
+    # Reset if we've cycled through almost everything
     if len(available_pool) < 20:
         available_pool = BIG_POOL
 
@@ -53,7 +51,6 @@ def get_new_batch():
             f = feedparser.parse(url)
             if f.entries:
                 e = f.entries[0]
-                # Fast scrape for thumbnail
                 r = requests.get(e.link, headers=headers, timeout=2)
                 soup = BeautifulSoup(r.content, 'html.parser')
                 img = soup.find("meta", property="og:image")
@@ -64,7 +61,6 @@ def get_new_batch():
 
 # --- UI ---
 st.title("⚽ INFINITE SOURCE NEWSROOM")
-st.write(f"Currently shuffling through **{len(BIG_POOL)}** global news outlets.")
 
 if 'visual_feed' not in st.session_state:
     st.session_state.visual_feed = get_new_batch()
@@ -83,10 +79,26 @@ for idx, item in enumerate(st.session_state.visual_feed):
         if st.button("Generate Post", key=f"btn_{idx}"):
             st.session_state.active = item
 
-# POST GENERATION SECTION
+# POST GENERATION
 if 'active' in st.session_state:
     it = st.session_state.active
     st.divider()
     tag_line = f"#{it['s'].replace(' ', '')} #Soccer #Update2026 #Football"
     
-    deep_text = f"📰 **THE DEEP SCOOP: {it['t'].upper()}**\n\n⚽ **BREAKING:** {it['t
+    # FIXED SYNTAX HERE
+    deep_text = f"📰 **THE DEEP SCOOP: {it['t'].upper()}**\n\n⚽ **BREAKING:** {it['t']}\n\n🔗 **FULL STORY:** {it['l']}\n\n{tag_line}"
+    fast_text = f"⚡ **FAST UPDATE**\n\n📍 {it['t']}\n\n👉 Details: {it['l']}\n\n{tag_line}"
+
+    c1, c2 = st.columns(2)
+    with c1: 
+        st.subheader("Deep Scoop")
+        st.code(deep_text, language="markdown")
+    with c2: 
+        st.subheader("Fast Update")
+        st.code(fast_text, language="markdown")
+
+# REFRESH BUTTON
+if st.button("🔄 REFRESH: SHOW 20 NEW SOURCES"):
+    with st.spinner("Finding 20 different outlets..."):
+        st.session_state.visual_feed = get_new_batch()
+        st.rerun()
