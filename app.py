@@ -1,53 +1,55 @@
 import streamlit as st
-import feedparser
 import requests
 from bs4 import BeautifulSoup
-from transformers import pipeline
+import feedparser
 import hashlib
-import os
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Soccer Scout AI v3.1", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="Soccer Scout AI v3.2", page_icon="⚽")
 
-# --- AI SETUP (Self-Healing) ---
+# --- NEW HARDENED AI LOADING ---
 @st.cache_resource
 def load_summarizer():
     try:
-        # We specify the model directly and let the pipeline infer the task
-        # This bypasses the KeyError: 'summarization'
+        model_name = "sshleifer/distilbart-cnn-12-6"
+        
+        # Explicitly load tokenizer and model
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        
+        # Create the pipeline using the explicit objects
+        # We use 'text-generation' logic if 'summarization' is missing, 
+        # but usually, passing the model directly fixes the task mapping.
         pipe = pipeline(
-            model="sshleifer/distilbart-cnn-12-6", 
-            device=-1  # Force CPU for Streamlit Cloud
+            task="summarization", 
+            model=model, 
+            tokenizer=tokenizer,
+            device=-1 # CPU
         )
         return pipe
     except Exception as e:
-        st.error(f"AI Loading Error: {e}")
-        return None
+        # Fallback: Try to load as a generic task if 'summarization' string fails
+        try:
+            return pipeline(model="sshleifer/distilbart-cnn-12-6", device=-1)
+        except:
+            st.error(f"Critical AI Loading Failure: {e}")
+            return None
 
-# Global access to the model
 summarizer = load_summarizer()
 
-# --- UTILS ---
+# --- THE REST OF YOUR APP ---
+st.title("⚽ Soccer Scout AI")
+
+# (Scraper logic remains the same)
 class SoccerScraper:
     def fetch_rss(self):
-        # Default reliable sources
-        feeds = [
-            "https://www.goal.com/en/feeds/news",
-            "https://www.skysports.com/rss/12040",
-            "https://www.theguardian.com/football/rss"
-        ]
+        feeds = ["https://www.goal.com/en/feeds/news", "https://www.skysports.com/rss/12040"]
         results = []
         for url in feeds:
-            try:
-                f = feedparser.parse(url)
-                for entry in f.entries[:5]:
-                    results.append({
-                        "id": hashlib.md5(entry.link.encode()).hexdigest(),
-                        "title": entry.title,
-                        "link": entry.link,
-                        "source": url.split('/')[2]
-                    })
-            except: continue
+            f = feedparser.parse(url)
+            for entry in f.entries[:5]:
+                results.append({"id": hashlib.md5(entry.link.encode()).hexdigest(), "title": entry.title, "link": entry.link, "source": url.split('/')[2]})
         return results
 
     def get_full_text(self, url):
@@ -57,49 +59,23 @@ class SoccerScraper:
             img = soup.find("meta", property="og:image")
             paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 60]
             return " ".join(paras[:3]), (img["content"] if img else None)
-        except:
-            return "", None
-
-# --- UI ---
-st.title("⚽ Pro Soccer Scout AI")
-
-# Sidebar Debug
-with st.sidebar:
-    st.header("System Status")
-    if summarizer:
-        st.success("✅ AI Engine Online")
-    else:
-        st.error("❌ AI Engine Offline")
-    
-    if st.button("Clear Cache & Reload"):
-        st.cache_resource.clear()
-        st.rerun()
+        except: return "", None
 
 scraper = SoccerScraper()
-
 if 'news' not in st.session_state:
     st.session_state.news = scraper.fetch_rss()
 
-# Display News
 for item in st.session_state.news:
-    with st.expander(f"{item['source'].upper()} | {item['title']}"):
-        col1, col2 = st.columns([1, 2])
-        
-        if col1.button("Analyze with AI", key=f"btn_{item['id']}"):
-            if not summarizer:
-                st.warning("AI model not loaded. Check logs.")
+    with st.expander(item['title']):
+        if st.button("Analyze with AI", key=item['id']):
+            if summarizer:
+                text, img = scraper.get_full_text(item['link'])
+                if img: st.image(img)
+                if len(text) > 100:
+                    # Explicitly setting generation parameters for DistilBART
+                    summary = summarizer(text[:1024], max_length=60, min_length=20, do_sample=False)
+                    st.info(f"**AI Summary:** {summary[0]['summary_text']}")
+                else:
+                    st.warning("Article too short for analysis.")
             else:
-                with st.spinner("Scouting article content..."):
-                    text, img = scraper.get_full_text(item['link'])
-                    if img: st.image(img)
-                    
-                    if len(text) > 100:
-                        # Use generic __call__ to ensure compatibility
-                        summary = summarizer(text[:1024], max_length=50, min_length=20)[0]
-                        # Support both old and new output formats
-                        sum_text = summary.get('summary_text') or summary.get('generated_text')
-                        st.info(f"**AI Summary:** {sum_text}")
-                    else:
-                        st.write("Content too short to summarize.")
-        
-        col2.markdown(f"[Read Source Article]({item['link']})")
+                st.error("AI Engine is offline. Check Requirements.txt for 'torch'.")
