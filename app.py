@@ -4,18 +4,22 @@ import requests
 from bs4 import BeautifulSoup
 import re
 
-# --- CONFIG & UI ---
-st.set_page_config(page_title="Soccer Scout: History & Deep Intel", page_icon="⚽", layout="wide")
+# --- CONFIG ---
+st.set_page_config(page_title="Soccer Scout Simple", page_icon="⚽", layout="wide")
 
 st.markdown("""
     <style>
     .main { background-color: #050505; color: white; }
-    .stCode { background-color: #111 !important; border: 1px solid #00ff41 !important; }
-    .source-btn { margin-bottom: 10px; }
+    .stCode { background-color: #111 !important; border: 1px solid #00ff41 !important; color: #e0e0e0 !important; }
+    .news-card {
+        background-color: #111; border: 1px solid #333; border-radius: 10px;
+        padding: 10px; height: 380px; transition: 0.3s;
+    }
+    .news-card:hover { border-color: #00ff41; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- THE 20 ELITE SOURCES ---
+# --- THE 20 SOURCES ---
 MASTER_POOL = [
     ("Goal.com", "https://www.goal.com/en/feeds/news"),
     ("Sky Sports", "https://www.skysports.com/rss/12040"),
@@ -39,99 +43,85 @@ MASTER_POOL = [
     ("Daily Sun Soccer", "https://www.snl24.com/dailysun/sport/rss")
 ]
 
-def get_deep_and_history(urls):
-    """Scrapes content and specifically looks for historical keywords."""
-    combined = []
-    history_snippets = []
+@st.cache_data(ttl=600)
+def fetch_grid():
+    data = []
     headers = {'User-Agent': 'Mozilla/5.0'}
-    
-    # Keywords to trigger historical comparison
-    hist_keys = ['previously', 'last time', 'record', 'history', 'former', 'anniversary', 'years ago', 'meeting']
-    
-    for url in urls[:3]:
+    for name, url in MASTER_POOL:
         try:
-            r = requests.get(url, headers=headers, timeout=8)
-            soup = BeautifulSoup(r.content, 'html.parser')
-            paras = [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 100]
-            
-            if paras:
-                combined.append(paras[0]) # Main story
-                # Search all paragraphs for history
-                for p in paras:
-                    if any(key in p.lower() for key in hist_keys):
-                        history_snippets.append(p)
-                        break
-        except: continue
-    return combined, list(set(history_snippets)) # Remove duplicates
-
-# --- APP MAIN ---
-st.title("⚽ Pro Scout: Historical Compiler")
-
-if 'full_feed' not in st.session_state:
-    with st.spinner("Syncing 20 Global Newsrooms..."):
-        all_news = []
-        for name, url in MASTER_POOL:
             f = feedparser.parse(url)
             if f.entries:
-                all_news.append({"s": name, "t": f.entries[0].title, "l": f.entries[0].link})
-        st.session_state.full_feed = all_news
+                e = f.entries[0]
+                r = requests.get(e.link, headers=headers, timeout=3)
+                soup = BeautifulSoup(r.content, 'html.parser')
+                img = soup.find("meta", property="og:image")
+                img_url = img["content"] if img else "https://via.placeholder.com/400x225?text=Soccer"
+                data.append({"s": name, "t": e.title, "l": e.link, "img": img_url})
+        except: continue
+    return data
 
-query = st.text_input("Enter Team/Player for Deep Comparison:", placeholder="e.g. Celtic, Mbappe, Man Utd")
+def quick_scrape(url):
+    try:
+        r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+        soup = BeautifulSoup(r.content, 'html.parser')
+        paras = [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 100]
+        return paras[0] if paras else "Full story details at the link."
+    except: return "Summary unavailable."
 
-if query:
-    matches = [m for m in st.session_state.full_feed if query.lower() in m['t'].lower()]
-    
-    if matches:
-        st.success(f"Verified by {len(matches)} sources.")
+# --- UI DISPLAY ---
+st.title("⚽ 20-Source Newsroom")
+
+if 'visual_feed' not in st.session_state:
+    st.session_state.visual_feed = fetch_grid()
+
+cols = st.columns(4)
+for idx, item in enumerate(st.session_state.visual_feed):
+    with cols[idx % 4]:
+        st.markdown(f'''
+            <div class="news-card">
+                <img src="{item['img']}" style="width:100%; height:160px; object-fit:cover; border-radius:5px;">
+                <p style="color:#00ff41; font-size:12px; margin:10px 0 0 0;">{item['s']}</p>
+                <p style="font-weight:bold; font-size:14px;">{item['t']}</p>
+            </div>
+        ''', unsafe_allow_html=True)
+        if st.button("Generate Post", key=f"btn_{idx}"):
+            st.session_state.active = item
+
+st.divider()
+
+# --- THE SIMPLIFIED SUMMARY OUTPUT ---
+if 'active' in st.session_state:
+    it = st.session_state.active
+    with st.spinner("Simplifying summary..."):
+        detail = quick_scrape(it['l'])
+        # Automatic Hashtags based on source and topic
+        tag_line = f"#{it['s'].replace(' ', '')} #Football #SoccerNews #Update2026"
         
-        # Display Clickable Source Links
-        st.write("🔗 **Official Source Links:**")
-        cols = st.columns(len(matches[:5])) # Show first 5 links as buttons
-        for idx, m in enumerate(matches[:5]):
-            cols[idx].link_button(f"Read on {m['s']}", m['l'])
+        # 1. THE DEEP SCOOP
+        deep_text = (
+            f"📰 **THE DEEP SCOOP: {it['t'].upper()}**\n\n"
+            f"⚽ **DETAILS:** {detail}\n\n"
+            f"🔗 **FULL STORY:** {it['l']}\n\n"
+            f"{tag_line}"
+        )
 
-        if st.button("🚀 GENERATE COMPILED REPORTS"):
-            with st.spinner("Analyzing current events vs history..."):
-                urls = [m['l'] for m in matches]
-                source_names = [m['s'] for m in matches]
-                main_data, hist_data = get_deep_and_history(urls)
-                
-                # Hashtag Block
-                tags = f"#Soccer #Football #Analysis #{query.replace(' ', '')} " + " ".join([f"#{s.replace(' ', '').replace('.','')}" for s in source_names])
+        # 2. THE FAST UPDATE
+        fast_text = (
+            f"⚡ **FAST UPDATE**\n\n"
+            f"📍 {it['t']}\n\n"
+            f"👉 Details: {it['l']}\n\n"
+            f"{tag_line}"
+        )
 
-                # --- 1. DEEP SUMMARY (With History) ---
-                history_section = ""
-                if hist_data:
-                    history_section = f"📜 **HISTORICAL CONTEXT:**\n{hist_data[0][:350]}...\n\n"
-                else:
-                    history_section = "📜 **HISTORICAL CONTEXT:** This appears to be a fresh development with no direct historical match-up mentioned in current reports.\n\n"
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("Option 1: Detailed Post")
+            st.code(deep_text, language="markdown")
+        with c2:
+            st.subheader("Option 2: Short Post")
+            st.code(fast_text, language="markdown")
 
-                deep_summary = (
-                    f"📑 **DEEP INTELLIGENCE REPORT: {query.upper()}** 📑\n\n"
-                    f"Our Newsroom has cross-referenced {len(matches)} sources ({', '.join(source_names[:3])}).\n\n"
-                    f"🏟️ **THE CURRENT SITUATION:**\n{main_data[0] if main_data else 'Details pending.'}\n\n"
-                    f"{history_section}"
-                    f"📈 **MARKET VERDICT:** The consensus across {len(matches)} outlets suggests significant impact on the upcoming schedule.\n\n"
-                    f"🔗 **READ FULL STORIES:**\n" + "\n".join([f"- {m['l']}" for m in matches[:2]]) + 
-                    f"\n\n{tags}"
-                )
-
-                # --- 2. QUICK SUMMARY (Fast Read) ---
-                quick_summary = (
-                    f"⚡ **QUICK SCOUT ALERT: {query.upper()}** ⚡\n\n"
-                    f"🟢 **STATUS:** {matches[0]['t']}\n"
-                    f"🟢 **HISTORY:** {'Historical trend detected' if hist_data else 'New development'}\n"
-                    f"🟢 **CONSENSUS:** Confirmed by {len(matches)} global networks.\n\n"
-                    f"👇 CLICKABLE LINKS IN BIO!\n\n{tags}"
-                )
-
-                # --- OUTPUT ---
-                st.divider()
-                st.subheader("📋 Deep Intelligence (Long-Form)")
-                st.code(deep_summary, language="markdown")
-                
-                st.subheader("📋 Quick Scout (Short-Form)")
-                st.code(quick_summary, language="markdown")
-
-    else:
-        st.warning(f"No active news for '{query}' in the last 24 hours. Try another term.")
+if st.button("🔄 Refresh Grid"):
+    st.cache_data.clear()
+    del st.session_state.visual_feed
+    st.rerun()
