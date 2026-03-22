@@ -7,7 +7,7 @@ import time
 import random
 
 # --- CONFIG ---
-st.set_page_config(page_title="NEO-SCOUT // V9", page_icon="📡", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT // V10", page_icon="📡", layout="wide")
 
 # --- STYLING ---
 st.markdown("""
@@ -26,6 +26,17 @@ h1, h2, h3, p, span, div { color: #00ff41 !important; text-shadow: 0 0 5px #00ff
 </style>
 """, unsafe_allow_html=True)
 
+# --- REFRESH BUTTON ---
+if "refresh_key" not in st.session_state:
+    st.session_state.refresh_key = 0
+
+col1, col2 = st.columns([1, 6])
+with col1:
+    if st.button("🔄 REFRESH"):
+        st.session_state.refresh_key += 1
+        st.cache_data.clear()
+        st.rerun()
+
 # --- SMART FALLBACK ---
 def smart_fallback_summary(text):
     sentences = text.split('. ')
@@ -43,14 +54,14 @@ def smart_fallback_summary(text):
     top = sorted(scored, reverse=True)[:3]
     return ". ".join([s[1] for s in top]).strip() + "."
 
-# --- FORMAT OUTPUT ---
+# --- FORMAT ---
 def format_summary_output(summary, title):
     return f"""⚽ {title}
 
 🔥 {summary}
 """
 
-# --- AI ENGINE ---
+# --- AI ---
 def query_ai_deep(text, title=""):
     API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
 
@@ -60,29 +71,22 @@ def query_ai_deep(text, title=""):
     headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
 
     prompt = f"""
-Summarize this football news article in a sharp, engaging way.
-
-Rules:
-- Max 3 sentences
-- Sentence 1: Main breaking news
-- Sentence 2: Key details
-- Sentence 3: Context/impact
-- Style: ESPN / BBC Sport
+Summarize this football news article in 3 sharp sentences:
+1. Breaking news
+2. Key details
+3. Impact
 
 Title: {title}
 
-Article:
 {text[:1200]}
 """
 
     payload = {
         "inputs": prompt,
-        "parameters": {"max_length": 140, "min_length": 60, "temperature": 0.7}
+        "parameters": {"max_length": 140, "min_length": 60}
     }
 
-    wait_times = [3, 6, 10]
-
-    for wait in wait_times:
+    for wait in [3, 6, 10]:
         try:
             r = requests.post(API_URL, headers=headers, json=payload, timeout=20)
             res = r.json()
@@ -92,50 +96,64 @@ Article:
 
             if "estimated_time" in res:
                 time.sleep(wait)
-                continue
 
         except:
             continue
 
     return format_summary_output(smart_fallback_summary(text), title)
 
-# --- CACHE ---
 @st.cache_data(ttl=3600)
 def cached_summary(text, title):
     return query_ai_deep(text, title)
 
-# --- TAG ENGINE ---
+# --- TAGS ---
 def generate_viral_tags(title):
     base = ["#Football", "#SoccerNews", "#Breaking", "#Sports"]
-
     t = title.lower()
+
     if "transfer" in t:
         base += ["#TransferNews", "#HereWeGo"]
-    if "goal" in t or "win" in t:
-        base += ["#MatchDay", "#Highlights"]
+    if "goal" in t:
+        base += ["#Goal", "#MatchDay"]
     if "injury" in t:
         base += ["#InjuryUpdate"]
 
     return " ".join(random.sample(base, k=min(5, len(base))))
 
-# --- BREAKING DETECTOR ---
+# --- BREAKING ---
 def is_breaking_news(title):
-    keywords = ["BREAKING", "CONFIRMED", "DONE DEAL"]
-    return any(k in title.upper() for k in keywords)
+    return any(k in title.upper() for k in ["BREAKING", "CONFIRMED", "DONE DEAL"])
 
-# --- FETCH RSS ---
+# --- 20 SOURCES ---
 @st.cache_data(ttl=600)
-def get_live_stream():
+def get_live_stream(refresh_key):
     feeds = [
         "https://www.goal.com/en/feeds/news",
         "https://www.skysports.com/rss/12040",
-        "http://feeds.bbci.co.uk/sport/football/rss.xml"
+        "http://feeds.bbci.co.uk/sport/football/rss.xml",
+        "https://www.espn.com/espn/rss/soccer/news",
+        "https://www.theguardian.com/football/rss",
+        "https://talksport.com/football/feed/",
+        "https://www.90min.com/rss",
+        "https://www.fourfourtwo.com/rss",
+        "https://www.sportingnews.com/uk/rss",
+        "https://www.mirror.co.uk/sport/football/rss.xml",
+        "https://www.independent.co.uk/sport/football/rss",
+        "https://metro.co.uk/sport/football/feed/",
+        "https://www.cbssports.com/rss/headlines/soccer/",
+        "https://www.foxsports.com/soccer/rss",
+        "https://www.besoccer.com/rss/news",
+        "https://www.worldsoccertalk.com/feed/",
+        "https://www.mlssoccer.com/rss",
+        "https://www.laliga.com/rss",
+        "https://www.premierleague.com/news/rss.xml",
+        "https://www.bundesliga.com/rss/news"
     ]
 
     stream = []
     for url in feeds:
         f = feedparser.parse(url)
-        for entry in f.entries[:6]:
+        for entry in f.entries[:4]:
             stream.append({
                 "id": hashlib.md5(entry.link.encode()).hexdigest(),
                 "title": entry.title.upper(),
@@ -161,9 +179,9 @@ def scrape_intel(url):
         return "", None
 
 # --- UI ---
-st.title("📡 NEO-SCOUT // V9.0 ELITE")
+st.title("📡 NEO-SCOUT // V10 ELITE")
 
-news_stream = get_live_stream()
+news_stream = get_live_stream(st.session_state.refresh_key)
 
 for item in news_stream:
     with st.container(border=True):
@@ -183,7 +201,6 @@ for item in news_stream:
                 if image:
                     st.image(image, use_container_width=True)
 
-                    # Download button
                     try:
                         img_data = requests.get(image).content
                         st.download_button("⬇ DOWNLOAD IMAGE", img_data, file_name="news.jpg")
@@ -197,8 +214,6 @@ for item in news_stream:
                     full_post = f"{summary}\n\n{tags}"
 
                     st.text_area(">> SOCIAL READY", value=full_post, height=200)
-
-                    # Copy button
                     st.code(full_post)
 
                     char_count = len(full_post)
@@ -215,4 +230,4 @@ for item in news_stream:
         st.markdown(f"[>> SOURCE LINK]({item['link']})")
 
 st.markdown("---")
-st.write(">> SYSTEM ONLINE // NEO-SCOUT V9")
+st.write(">> SYSTEM ONLINE // NEO-SCOUT V10")
