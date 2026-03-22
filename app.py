@@ -3,6 +3,7 @@ import feedparser
 import requests
 from bs4 import BeautifulSoup
 import random
+import re
 
 # --- CONFIG & STYLING ---
 st.set_page_config(page_title="Pro Soccer Scout AI", page_icon="⚽", layout="wide")
@@ -22,61 +23,71 @@ st.markdown("""
     .source-tag { color: #00ff41; font-weight: bold; font-size: 0.8rem; text-transform: uppercase; }
     .headline-link { color: white; font-weight: bold; text-decoration: none; font-size: 1.2rem; }
     .summary-box { 
-        background-color: #000; padding: 15px; border-radius: 10px; 
-        border-left: 4px solid #00ff41; line-height: 1.6; color: #d1d1d1;
+        background-color: #1a1a1a; padding: 20px; border-radius: 10px; 
+        border-left: 5px solid #00ff41; margin-top: 10px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- SOURCE POOL (From your soccer_news_sources_formatted.txt) ---
-# [cite: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+# --- SOURCE POOL ---
 MASTER_POOL = [
-    ("Goal.com", "https://www.goal.com"), ("Sky Sports", "https://www.skysports.com/football"),
-    ("BBC Sport", "https://www.bbc.com/sport/football"), ("Soccer Laduma", "https://www.soccerladuma.co.za"),
-    ("KickOff", "https://www.kickoff.com"), ("ESPN FC", "https://www.espn.com/soccer/"),
-    ("The Guardian", "https://www.theguardian.com/football"), ("90min", "https://www.90min.com"),
-    ("Transfermarkt", "https://www.transfermarkt.com"), ("Marca", "https://www.marca.com/en/football.html")
+    ("Goal.com", "https://www.goal.com/en/feeds/news"),
+    ("Sky Sports", "https://www.skysports.com/rss/12040"),
+    ("BBC Sport", "https://push.api.bbci.co.uk/morph/items?page=1&limit=10&feed=football"),
+    ("Soccer Laduma", "https://www.snl24.com/soccerladuma/rss"),
+    ("KickOff", "https://www.snl24.com/kickoff/rss"),
+    ("ESPN FC", "https://www.espn.com/espn/rss/soccer/news"),
+    ("The Guardian", "https://www.theguardian.com/football/rss"),
+    ("90min", "https://www.90min.com/posts.rss"),
+    ("Transfermarkt", "https://www.transfermarkt.com/rss/news"),
+    ("Marca", "https://e00-marca.uecdn.es/rss/en/index.xml")
 ]
 
-# --- UTILITY FUNCTIONS ---
-def get_3_para_summary(url):
-    """Scrapes an article and formats it into a 3-paragraph summary."""
+# --- SCRAPING ENGINE ---
+def get_deep_summary(url):
+    """Scrapes a URL and returns a 3-paragraph summary."""
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         r = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(r.content, 'html.parser')
         
-        # Extract all paragraphs with substantial text
-        paras = [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 120]
+        # Extract main text paragraphs
+        paragraphs = [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 100]
         
-        if len(paras) < 3:
-            return "Unable to extract enough detail for a 3-paragraph summary. Please check the source link directly."
+        if len(paragraphs) < 3:
+            return "⚠️ I couldn't find enough text on that page to make a full report. It might be protected or have too little content."
 
-        # Organize into 3 specific sections
-        total = len(paras)
-        para1 = " ".join(paras[:max(1, total // 3)])
-        para2 = " ".join(paras[max(1, total // 3):max(2, (2 * total) // 3)])
-        para3 = " ".join(paras[max(2, (2 * total) // 3):])
+        # Logic to split into 3 distinct sections
+        chunk = len(paragraphs) // 3
+        p1 = " ".join(paragraphs[:chunk])
+        p2 = " ".join(paragraphs[chunk:chunk*2])
+        p3 = " ".join(paragraphs[chunk*2:])
 
-        summary = f"**1. Overview:** {para1[:400]}...\n\n"
-        summary += f"**2. Key Analysis:** {para2[:450]}...\n\n"
-        summary += f"**3. Outlook:** {para3[:400]}..."
-        return summary
+        report = f"### 📄 AI SCOUT DEEP-DIVE REPORT\n\n"
+        report += f"**📍 THE LEAD:** {p1[:450]}...\n\n"
+        report += f"**🔍 THE DETAILS:** {p2[:500]}...\n\n"
+        report += f"**🏁 THE VERDICT:** {p3[:450]}..."
+        return report
     except Exception as e:
-        return f"Error connecting to source: {str(e)}"
+        return f"❌ Error: Could not connect to the site. ({str(e)})"
 
 def fetch_20():
-    """Simulates fetching from random sources in your pool."""
+    """Picks 20 random sources and gets 1 story from each."""
     random_sources = random.sample(MASTER_POOL, min(len(MASTER_POOL), 20))
-    # In a real app, you would use feedparser here to get live RSS entries
-    # This is a placeholder for demonstration
-    return [{'s': s[0], 't': f"Latest Update from {s[0]}", 'l': s[1]} for s in random_sources]
+    results = []
+    for name, url in random_sources:
+        try:
+            f = feedparser.parse(url)
+            if f.entries:
+                results.append({'s': name, 't': f.entries[0].title, 'l': f.entries[0].link})
+        except: continue
+    return results
 
 # --- APP LAYOUT ---
-tab1, tab2 = st.tabs(["📢 Social News Feed", "💬 Chat with Scout"])
+tab1, tab2 = st.tabs(["📢 Global Scout Feed", "💬 Chat with AI Scout"])
 
 with tab1:
-    st.title("⚽ GLOBAL SOCCER AGGREGATOR")
+    st.title("⚽ ULTRA SOCCER AGGREGATOR")
     if st.button("🔄 REFRESH: SCAN NEW SOURCES"):
         st.session_state.news_feed = fetch_20()
 
@@ -84,53 +95,56 @@ with tab1:
         st.session_state.news_feed = fetch_20()
 
     for i, item in enumerate(st.session_state.news_feed, 1):
-        st.markdown(f'<div class="news-card">', unsafe_allow_html=True)
-        st.markdown(f'<div class="source-tag">{i}. {item["s"]}</div>', unsafe_allow_html=True)
-        st.markdown(f'<a href="{item["l"]}" target="_blank" class="headline-link">{item["t"]}</a>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown(f'''
+        <div class="news-card">
+            <div class="source-tag">{i}. {item['s']}</div>
+            <a href="{item['l']}" target="_blank" class="headline-link">{item['t']}</a>
+        </div>
+        ''', unsafe_allow_html=True)
 
 with tab2:
-    st.header("🤖 AI Scout Assistant")
-    st.caption("Ask me to 'summarize' any story from your feed!")
+    st.header("🤖 Web Summarizer Assistant")
+    st.caption("Paste any URL or type 'Summarize source 1' to get a 3-paragraph report!")
 
     if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": "Welcome! You can ask me to 'summarize source 1' or ask about a specific team."}]
+        st.session_state.messages = [{"role": "assistant", "content": "I am ready. Paste a link or ask about the current feed!"}]
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if prompt := st.chat_input("Summarize source 1..."):
+    if prompt := st.chat_input("Paste a link or say 'Summarize source 1'"):
         st.chat_message("user").markdown(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        query = prompt.lower()
-        response = ""
-
-        # Logic for 3-paragraph summary command
-        if "summarize source" in query:
-            try:
-                index = int(query.split("source")[-1].strip()) - 1
-                if 0 <= index < len(st.session_state.news_feed):
-                    target = st.session_state.news_feed[index]
-                    with st.spinner(f"Scraping {target['s']} for a detailed summary..."):
-                        detail_text = get_3_para_summary(target['l'])
-                        response = f"### Detailed Report: {target['t']}\n\n{detail_text}"
-                else:
-                    response = "Invalid source number. Please choose a number from the current feed."
-            except:
-                response = "Please use the format: 'Summarize source 1'."
+        # LOGIC 1: Detect if user pasted a direct URL
+        url_match = re.search(r'https?://\S+', prompt)
         
-        # General search logic
+        if url_match:
+            target_url = url_match.group()
+            with st.spinner("Scraping webpage for a 3-paragraph summary..."):
+                response = get_deep_summary(target_url)
+        
+        # LOGIC 2: Detect "Summarize source X" command
+        elif "summarize source" in prompt.lower():
+            try:
+                idx = int(prompt.lower().split("source")[-1].strip()) - 1
+                target_url = st.session_state.news_feed[idx]['l']
+                with st.spinner(f"Analyzing {st.session_state.news_feed[idx]['s']}..."):
+                    response = get_deep_summary(target_url)
+            except:
+                response = "❌ Please provide a valid source number (e.g., 'Summarize source 1')."
+        
+        # LOGIC 3: General Keyword Search
         else:
-            matches = [n for n in st.session_state.news_feed if query in n['t'].lower()]
+            matches = [n for n in st.session_state.news_feed if prompt.lower() in n['t'].lower()]
             if matches:
-                response = "I found these matches. Ask me to 'summarize source [number]' for a 3-paragraph report:\n\n"
+                response = "I found these stories. Which one should I summarize for you?\n\n"
                 for m in matches:
-                    response += f"- {m['s']}: {m['t']}\n"
+                    response += f"- **{m['s']}**: {m['t']}\n"
             else:
-                response = "I couldn't find a direct match. Try asking to 'summarize source 1'."
+                response = "🔍 I couldn't find a specific match. Paste a link directly if you want me to summarize an external page!"
 
         with st.chat_message("assistant"):
-            st.markdown(response)
+            st.markdown(f'<div class="summary-box">{response}</div>', unsafe_allow_html=True)
         st.session_state.messages.append({"role": "assistant", "content": response})
