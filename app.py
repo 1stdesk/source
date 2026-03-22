@@ -4,9 +4,10 @@ import feedparser
 import hashlib
 from bs4 import BeautifulSoup
 import random
+from collections import Counter
 
 # --- CONFIG ---
-st.set_page_config(page_title="NEO-SCOUT V13", page_icon="📡", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT V14", page_icon="📡", layout="wide")
 
 # --- SESSION ---
 if "refresh_key" not in st.session_state:
@@ -14,137 +15,77 @@ if "refresh_key" not in st.session_state:
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.title("⚙️ NEO-SCOUT")
+    st.title("📡 NEO-SCOUT")
 
-    if st.button("🔄 Refresh Feed"):
+    if st.button("🔄 Refresh"):
         st.session_state.refresh_key += 1
         st.cache_data.clear()
         st.rerun()
 
     st.markdown("---")
-
     st.subheader("Filters")
+
     show_breaking = st.checkbox("🚨 Breaking Only")
-    show_images = st.checkbox("🖼 Show Images", value=True)
+    auto_ai = st.checkbox("🧠 Auto AI", value=True)
+    show_images = st.checkbox("🖼 Images", value=True)
 
 # --- CLEAN TEXT ---
 def clean_text(text):
     lines = text.split("\n")
-    cleaned, seen = [], set()
-
-    for line in lines:
-        line = line.strip()
-        if len(line) < 40:
-            continue
-        if any(x in line.lower() for x in ["cookie", "subscribe", "sign up"]):
-            continue
-        if line not in seen:
-            seen.add(line)
-            cleaned.append(line)
-
+    cleaned = []
+    for l in lines:
+        l = l.strip()
+        if len(l) > 40 and "cookie" not in l.lower():
+            cleaned.append(l)
     return " ".join(cleaned)
 
-def clean_summary(summary):
-    sentences = summary.split(". ")
-    unique, seen = [], set()
-
-    for s in sentences:
-        s = s.strip()
-        if s and s not in seen:
-            seen.add(s)
-            unique.append(s)
-
-    return ". ".join(unique[:3]).strip() + "."
+def clean_summary(text):
+    s = text.split(". ")
+    return ". ".join(s[:3]).strip() + "."
 
 # --- SIMILARITY ---
-def is_similar(t1, t2):
-    ignore = {"the","and","to","in","of","for","on","with"}
-    s1 = set([w for w in t1.lower().split() if w not in ignore])
-    s2 = set([w for w in t2.lower().split() if w not in ignore])
-    return len(s1.intersection(s2)) >= 3
-
-def find_related(main, all_items):
-    return [i for i in all_items if i["id"] != main["id"] and is_similar(main["title"], i["title"])][:5]
+def is_similar(a, b):
+    s1 = set(a.lower().split())
+    s2 = set(b.lower().split())
+    return len(s1 & s2) >= 3
 
 # --- SCRAPER ---
-def scrape_intel(url):
+def scrape(url):
     try:
-        r = requests.get(url, timeout=6, headers={'User-Agent': 'Mozilla/5.0'})
+        r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(r.content, 'html.parser')
 
         img = soup.find("meta", property="og:image")
 
-        paras = [p.get_text().strip() for p in soup.find_all('p')]
-        paras = [p for p in paras if len(p) > 60]
-
-        text = clean_text(" ".join(paras[:6]))
+        paras = [p.get_text() for p in soup.find_all("p")]
+        text = clean_text(" ".join(paras[:5]))
 
         return text, (img["content"] if img else None)
-
     except:
         return "", None
 
-# --- MERGE ---
-def merge_articles(main, all_items):
-    related = find_related(main, all_items)
-
-    combined = ""
-    main_text, img = scrape_intel(main["link"])
-    combined += main_text
-
-    for r in related:
-        txt, _ = scrape_intel(r["link"])
-        combined += "\n" + txt
-
-    return combined, related, img
-
 # --- AI ---
-def smart_fallback(text):
-    s = text.split(". ")
-    return ". ".join(s[:3]) if len(s) >= 3 else text[:200]
-
-def query_ai(text, title=""):
+def ai_summary(text, title):
     if "HF_TOKEN" not in st.secrets:
-        return clean_summary(smart_fallback(text))
-
-    API = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-    headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
-
-    prompt = f"""
-Write a professional football news summary.
-
-Max 60 words. No repetition.
-
-Title: {title}
-
-{text[:1200]}
-"""
+        return clean_summary(text)
 
     try:
-        r = requests.post(API, headers=headers, json={"inputs": prompt}, timeout=20)
-        res = r.json()
+        API = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+        headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
 
-        if isinstance(res, list):
-            return clean_summary(res[0]["summary_text"])
+        r = requests.post(API, headers=headers, json={"inputs": text[:1200]}, timeout=15)
+        out = r.json()
+
+        if isinstance(out, list):
+            return clean_summary(out[0]["summary_text"])
     except:
         pass
 
-    return clean_summary(smart_fallback(text))
+    return clean_summary(text)
 
 @st.cache_data(ttl=3600)
-def cached_summary(text, title):
-    return query_ai(text, title)
-
-# --- TAGS ---
-def generate_tags(title):
-    base = ["#Football", "#SoccerNews", "#Breaking"]
-    if "transfer" in title.lower():
-        base += ["#Transfer"]
-    return " ".join(random.sample(base, k=min(4, len(base))))
-
-# --- BREAKING ---
-def is_breaking(title):
-    return any(k in title for k in ["BREAKING", "CONFIRMED"])
+def cached_ai(text, title):
+    return ai_summary(text, title)
 
 # --- FEEDS ---
 @st.cache_data(ttl=600)
@@ -157,93 +98,84 @@ def get_news(key):
         "https://www.theguardian.com/football/rss"
     ]
 
-    out = []
-    for url in feeds:
-        f = feedparser.parse(url)
-        for e in f.entries[:3]:
-            out.append({
+    seen = set()
+    data = []
+
+    for f in feeds:
+        feed = feedparser.parse(f)
+        for e in feed.entries[:4]:
+            title = e.title.upper()
+
+            if title in seen:
+                continue
+            seen.add(title)
+
+            data.append({
                 "id": hashlib.md5(e.link.encode()).hexdigest(),
-                "title": e.title.upper(),
+                "title": title,
                 "link": e.link,
-                "src": url.split('/')[2]
+                "src": f.split('/')[2]
             })
-    return out
+
+    return data
+
+# --- TRENDING ---
+def get_trending(news):
+    words = []
+    ignore = {"THE","AND","TO","IN","OF","FOR"}
+    for n in news:
+        words += [w for w in n["title"].split() if w not in ignore]
+    return Counter(words).most_common(8)
+
+# --- BREAKING ---
+def is_breaking(title):
+    return "BREAKING" in title or "CONFIRMED" in title
 
 # --- HEADER ---
-st.title("📡 NEO-SCOUT V13")
-st.caption("Real-Time Football Intelligence Terminal")
+st.title("📡 NEO-SCOUT V14")
+st.caption("Elite Football Intelligence System")
 
-# --- STYLES ---
-st.markdown("""
-<style>
-.news-card {
-    border: 1px solid #e5e7eb;
-    border-radius: 10px;
-    padding: 14px;
-    margin-bottom: 12px;
-    background: #ffffff;
-}
-
-.news-title {
-    font-size: 17px;
-    font-weight: 600;
-}
-
-.news-source {
-    font-size: 12px;
-    color: #6b7280;
-}
-
-.breaking {
-    color: red;
-    font-size: 12px;
-    font-weight: bold;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# --- MAIN ---
+# --- MAIN LAYOUT ---
 news = get_news(st.session_state.refresh_key)
 
-for item in news:
+col_main, col_side = st.columns([3,1])
 
-    if show_breaking and not is_breaking(item["title"]):
-        continue
+# --- MAIN FEED ---
+with col_main:
 
-    st.markdown('<div class="news-card">', unsafe_allow_html=True)
+    # Breaking banner
+    breaking_news = [n for n in news if is_breaking(n["title"])]
 
-    st.markdown(f"<div class='news-source'>{item['src']}</div>", unsafe_allow_html=True)
+    if breaking_news:
+        st.error(f"🚨 BREAKING: {breaking_news[0]['title']}")
 
-    if is_breaking(item["title"]):
-        st.markdown("<div class='breaking'>🚨 BREAKING</div>", unsafe_allow_html=True)
+    for item in news:
 
-    st.markdown(f"<div class='news-title'>{item['title']}</div>", unsafe_allow_html=True)
+        if show_breaking and not is_breaking(item["title"]):
+            continue
 
-    col1, col2 = st.columns([1,2])
+        st.markdown("---")
+        st.subheader(item["title"])
+        st.caption(item["src"])
 
-    with col1:
-        if st.button("Analyze", key=item["id"]):
+        with st.expander("📊 View Intelligence"):
 
-            with st.spinner("Processing..."):
+            text, img = scrape(item["link"])
 
-                merged_text, related, img = merge_articles(item, news)
+            if img and show_images:
+                st.image(img)
 
-                if img and show_images:
-                    st.image(img)
-
-                summary = cached_summary(merged_text, item["title"])
-                tags = generate_tags(item["title"])
-
+            if auto_ai:
+                summary = cached_ai(text, item["title"])
                 st.write(summary)
-                st.caption(tags)
 
-    with col2:
-        with st.expander("Sources"):
-            merged_text, related, _ = merge_articles(item, news)
-            for r in related:
-                st.write(f"- {r['src']}")
+# --- SIDE PANEL ---
+with col_side:
+    st.subheader("🔥 Trending")
 
-    st.markdown("</div>", unsafe_allow_html=True)
+    trends = get_trending(news)
+    for t, c in trends:
+        st.write(f"{t} ({c})")
 
 st.markdown("---")
-st.write("SYSTEM ACTIVE // V13 TERMINAL")
+st.write("SYSTEM ACTIVE // V14 ELITE")
