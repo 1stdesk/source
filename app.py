@@ -3,92 +3,29 @@ import requests
 import feedparser
 import hashlib
 from bs4 import BeautifulSoup
-import time
 import random
 
 # --- CONFIG ---
-st.set_page_config(page_title="NEO-SCOUT // V12", page_icon="📡", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT V13", page_icon="📡", layout="wide")
 
-# --- UI: GOOGLE + GLASS STYLE ---
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
-
-html, body, [class*="css"] {
-    font-family: 'Inter', sans-serif;
-    background: linear-gradient(135deg, #eef2ff, #f8fafc);
-}
-
-.block-container {
-    max-width: 820px;
-    margin: auto;
-    padding-top: 80px;
-}
-
-.glass {
-    background: rgba(255,255,255,0.25);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    border-radius: 20px;
-    padding: 25px;
-    border: 1px solid rgba(255,255,255,0.3);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-}
-
-.news-card {
-    background: rgba(255,255,255,0.55);
-    backdrop-filter: blur(12px);
-    border-radius: 18px;
-    padding: 18px;
-    margin-bottom: 18px;
-    transition: all 0.2s ease;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-}
-
-.news-card:hover {
-    transform: translateY(-5px);
-}
-
-div.stButton > button {
-    border-radius: 999px;
-    background: white;
-    border: 1px solid #ddd;
-    padding: 8px 18px;
-    transition: 0.2s;
-}
-
-div.stButton > button:hover {
-    background: #f1f3f4;
-    box-shadow: 0 4px 10px rgba(0,0,0,0.15);
-}
-
-.google-title {
-    text-align: center;
-    font-size: 42px;
-    font-weight: 600;
-    margin-bottom: 20px;
-}
-
-.breaking {
-    color: white;
-    background: #ea4335;
-    padding: 4px 10px;
-    border-radius: 8px;
-    font-size: 12px;
-    display: inline-block;
-    margin-bottom: 8px;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# --- REFRESH ---
+# --- SESSION ---
 if "refresh_key" not in st.session_state:
     st.session_state.refresh_key = 0
 
-if st.button("🔄 REFRESH"):
-    st.session_state.refresh_key += 1
-    st.cache_data.clear()
-    st.rerun()
+# --- SIDEBAR ---
+with st.sidebar:
+    st.title("⚙️ NEO-SCOUT")
+
+    if st.button("🔄 Refresh Feed"):
+        st.session_state.refresh_key += 1
+        st.cache_data.clear()
+        st.rerun()
+
+    st.markdown("---")
+
+    st.subheader("Filters")
+    show_breaking = st.checkbox("🚨 Breaking Only")
+    show_images = st.checkbox("🖼 Show Images", value=True)
 
 # --- CLEAN TEXT ---
 def clean_text(text):
@@ -107,7 +44,6 @@ def clean_text(text):
 
     return " ".join(cleaned)
 
-# --- CLEAN SUMMARY ---
 def clean_summary(summary):
     sentences = summary.split(". ")
     unique, seen = [], set()
@@ -137,11 +73,11 @@ def scrape_intel(url):
         soup = BeautifulSoup(r.content, 'html.parser')
 
         img = soup.find("meta", property="og:image")
+
         paras = [p.get_text().strip() for p in soup.find_all('p')]
         paras = [p for p in paras if len(p) > 60]
 
-        text = " ".join(paras[:6])
-        text = clean_text(text)
+        text = clean_text(" ".join(paras[:6]))
 
         return text, (img["content"] if img else None)
 
@@ -162,12 +98,11 @@ def merge_articles(main, all_items):
 
     return combined, related, img
 
-# --- FALLBACK ---
+# --- AI ---
 def smart_fallback(text):
     s = text.split(". ")
     return ". ".join(s[:3]) if len(s) >= 3 else text[:200]
 
-# --- AI ---
 def query_ai(text, title=""):
     if "HF_TOKEN" not in st.secrets:
         return clean_summary(smart_fallback(text))
@@ -176,19 +111,9 @@ def query_ai(text, title=""):
     headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
 
     prompt = f"""
-You are a professional football journalist.
+Write a professional football news summary.
 
-Write a clean match report.
-
-FORMAT:
-1. Result + key player
-2. How match was decided
-3. Impact
-
-RULES:
-- Max 60 words
-- No repetition
-- Clear and sharp
+Max 60 words. No repetition.
 
 Title: {title}
 
@@ -198,6 +123,7 @@ Title: {title}
     try:
         r = requests.post(API, headers=headers, json={"inputs": prompt}, timeout=20)
         res = r.json()
+
         if isinstance(res, list):
             return clean_summary(res[0]["summary_text"])
     except:
@@ -213,7 +139,7 @@ def cached_summary(text, title):
 def generate_tags(title):
     base = ["#Football", "#SoccerNews", "#Breaking"]
     if "transfer" in title.lower():
-        base += ["#TransferNews"]
+        base += ["#Transfer"]
     return " ".join(random.sample(base, k=min(4, len(base))))
 
 # --- BREAKING ---
@@ -228,22 +154,7 @@ def get_news(key):
         "https://www.skysports.com/rss/12040",
         "http://feeds.bbci.co.uk/sport/football/rss.xml",
         "https://www.espn.com/espn/rss/soccer/news",
-        "https://www.theguardian.com/football/rss",
-        "https://talksport.com/football/feed/",
-        "https://www.90min.com/rss",
-        "https://www.fourfourtwo.com/rss",
-        "https://www.cbssports.com/rss/headlines/soccer/",
-        "https://www.foxsports.com/soccer/rss",
-        "https://www.mirror.co.uk/sport/football/rss.xml",
-        "https://metro.co.uk/sport/football/feed/",
-        "https://www.independent.co.uk/sport/football/rss",
-        "https://www.sportingnews.com/uk/rss",
-        "https://www.worldsoccertalk.com/feed/",
-        "https://www.mlssoccer.com/rss",
-        "https://www.laliga.com/rss",
-        "https://www.premierleague.com/news/rss.xml",
-        "https://www.bundesliga.com/rss/news",
-        "https://www.besoccer.com/rss/news"
+        "https://www.theguardian.com/football/rss"
     ]
 
     out = []
@@ -259,63 +170,80 @@ def get_news(key):
     return out
 
 # --- HEADER ---
+st.title("📡 NEO-SCOUT V13")
+st.caption("Real-Time Football Intelligence Terminal")
+
+# --- STYLES ---
 st.markdown("""
-<div class="google-title">
-<span style='color:#4285F4'>N</span>
-<span style='color:#EA4335'>E</span>
-<span style='color:#FBBC05'>O</span>
-<span style='color:#4285F4'>-</span>
-<span style='color:#34A853'>S</span>
-<span style='color:#EA4335'>C</span>
-<span style='color:#4285F4'>O</span>
-<span style='color:#FBBC05'>U</span>
-<span style='color:#34A853'>T</span>
-</div>
+<style>
+.news-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 12px;
+    background: #ffffff;
+}
+
+.news-title {
+    font-size: 17px;
+    font-weight: 600;
+}
+
+.news-source {
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.breaking {
+    color: red;
+    font-size: 12px;
+    font-weight: bold;
+}
+</style>
 """, unsafe_allow_html=True)
 
 # --- MAIN ---
-st.markdown('<div class="glass">', unsafe_allow_html=True)
-
 news = get_news(st.session_state.refresh_key)
 
 for item in news:
+
+    if show_breaking and not is_breaking(item["title"]):
+        continue
+
     st.markdown('<div class="news-card">', unsafe_allow_html=True)
 
-    st.caption(f"🌐 {item['src']}")
+    st.markdown(f"<div class='news-source'>{item['src']}</div>", unsafe_allow_html=True)
 
     if is_breaking(item["title"]):
-        st.markdown('<div class="breaking">🚨 BREAKING</div>', unsafe_allow_html=True)
+        st.markdown("<div class='breaking'>🚨 BREAKING</div>", unsafe_allow_html=True)
 
-    st.subheader(item["title"])
+    st.markdown(f"<div class='news-title'>{item['title']}</div>", unsafe_allow_html=True)
 
-    if st.button("🧠 MULTI-SOURCE INTEL", key=item["id"]):
-        with st.spinner("AGGREGATING + CLEANING + ANALYZING..."):
+    col1, col2 = st.columns([1,2])
 
-            merged_text, related, img = merge_articles(item, news)
+    with col1:
+        if st.button("Analyze", key=item["id"]):
 
-            if img:
-                st.image(img)
-                try:
-                    st.download_button("DOWNLOAD IMAGE", requests.get(img).content)
-                except:
-                    pass
+            with st.spinner("Processing..."):
 
-            summary = cached_summary(merged_text, item["title"])
-            tags = generate_tags(item["title"])
+                merged_text, related, img = merge_articles(item, news)
 
-            st.success(f"SOURCES USED: {1 + len(related)}")
+                if img and show_images:
+                    st.image(img)
 
+                summary = cached_summary(merged_text, item["title"])
+                tags = generate_tags(item["title"])
+
+                st.write(summary)
+                st.caption(tags)
+
+    with col2:
+        with st.expander("Sources"):
+            merged_text, related, _ = merge_articles(item, news)
             for r in related:
-                st.caption(f"↳ {r['src']}")
-
-            full = f"⚽ {item['title']}\n\n{summary}\n\n{tags}"
-
-            st.text_area("OUTPUT", full, height=200)
-            st.code(full)
+                st.write(f"- {r['src']}")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-st.markdown('</div>', unsafe_allow_html=True)
-
 st.markdown("---")
-st.write("SYSTEM ACTIVE // V12 PRO")
+st.write("SYSTEM ACTIVE // V13 TERMINAL")
