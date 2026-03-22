@@ -69,25 +69,37 @@ def query_ai_report(text):
 # --- DATA STREAM ---
 @st.cache_data(ttl=300)
 def get_live_stream():
+    # AUDITED 2026 SOURCE LIST (NO PAYWALLS)
     sources = [
-        "https://www.goal.com/en/feeds/news",
-        "https://www.skysports.com/rss/12040",
-        "https://feeds.bbci.co.uk/sport/football/rss.xml",
-        "https://www.theguardian.com/football/rss"
+        "https://feeds.bbci.co.uk/sport/football/rss.xml",      # BBC (Cleanest)
+        "https://www.skysports.com/rss/12040",                 # Sky (Fastest)
+        "https://www.goal.com/en/feeds/news",                  # Goal (Global)
+        "https://www.espn.com/espn/rss/soccer/news",           # ESPN (Free Written)
+        "https://www.90min.com/posts.rss",                     # 90min (Engagement)
+        "https://api.foxsports.com/v1/rss?partnerKey=zBaFxYLoverq&tag=soccer", # Fox
+        "https://www.football365.com/feed",                    # F365 (Opinion)
+        "https://www.caughtoffside.com/feed/"                  # Transfers
     ]
+    
     random.shuffle(sources)
     stream = []
-    for url in sources[:3]: # Take 3 random sources per refresh
-        f = feedparser.parse(url)
-        for entry in f.entries[:4]:
-            stream.append({
-                "id": hashlib.md5(entry.link.encode()).hexdigest(), 
-                "title": entry.title.upper(), 
-                "link": entry.link, 
-                "src": url.split('/')[2].upper()
-            })
+    
+    # Process 4 random nodes to keep the refresh "fresh"
+    for url in sources[:4]:
+        try:
+            f = feedparser.parse(url)
+            source_name = url.split('/')[2].replace('www.', '').upper()
+            for entry in f.entries[:5]:
+                stream.append({
+                    "id": hashlib.md5(entry.link.encode()).hexdigest(), 
+                    "title": entry.title.upper(), 
+                    "link": entry.link, 
+                    "src": source_name
+                })
+        except:
+            continue
+            
     return stream
-
 # --- MAIN INTERFACE ---
 st.title("📡 NEO-SCOUT // AI_READER_V8.6")
 
