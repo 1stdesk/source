@@ -5,16 +5,17 @@ from bs4 import BeautifulSoup
 import re
 
 # --- CONFIG & UI ---
-st.set_page_config(page_title="Pro Scout: Deep Compiler", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="Soccer Scout: History & Deep Intel", page_icon="⚽", layout="wide")
 
 st.markdown("""
     <style>
-    .output-container { background-color: #0f172a; padding: 20px; border-radius: 12px; border: 1px solid #1e293b; margin-top: 20px; }
-    .header-style { color: #00ff41; font-family: 'Courier New', monospace; font-weight: bold; }
+    .main { background-color: #050505; color: white; }
+    .stCode { background-color: #111 !important; border: 1px solid #00ff41 !important; }
+    .source-btn { margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- THE 20 SOURCES ---
+# --- THE 20 ELITE SOURCES ---
 MASTER_POOL = [
     ("Goal.com", "https://www.goal.com/en/feeds/news"),
     ("Sky Sports", "https://www.skysports.com/rss/12040"),
@@ -38,75 +39,99 @@ MASTER_POOL = [
     ("Daily Sun Soccer", "https://www.snl24.com/dailysun/sport/rss")
 ]
 
-def get_deep_content(urls):
+def get_deep_and_history(urls):
+    """Scrapes content and specifically looks for historical keywords."""
     combined = []
+    history_snippets = []
     headers = {'User-Agent': 'Mozilla/5.0'}
-    for url in urls[:3]: # Scrape top 3 matching sources
+    
+    # Keywords to trigger historical comparison
+    hist_keys = ['previously', 'last time', 'record', 'history', 'former', 'anniversary', 'years ago', 'meeting']
+    
+    for url in urls[:3]:
         try:
-            r = requests.get(url, headers=headers, timeout=7)
+            r = requests.get(url, headers=headers, timeout=8)
             soup = BeautifulSoup(r.content, 'html.parser')
-            # Extract paragraphs that actually contain story data
-            paras = [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 120]
-            combined.append(paras)
+            paras = [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 100]
+            
+            if paras:
+                combined.append(paras[0]) # Main story
+                # Search all paragraphs for history
+                for p in paras:
+                    if any(key in p.lower() for key in hist_keys):
+                        history_snippets.append(p)
+                        break
         except: continue
-    return combined
+    return combined, list(set(history_snippets)) # Remove duplicates
 
-# --- MAIN LOGIC ---
-st.title("⚽ AI Newsroom: Deep Compiler")
+# --- APP MAIN ---
+st.title("⚽ Pro Scout: Historical Compiler")
 
-if 'news_data' not in st.session_state:
+if 'full_feed' not in st.session_state:
     with st.spinner("Syncing 20 Global Newsrooms..."):
         all_news = []
         for name, url in MASTER_POOL:
             f = feedparser.parse(url)
             if f.entries:
                 all_news.append({"s": name, "t": f.entries[0].title, "l": f.entries[0].link})
-        st.session_state.news_data = all_news
+        st.session_state.full_feed = all_news
 
-query = st.text_input("Search a Team or Player to Compile (e.g. 'Celtic'):")
+query = st.text_input("Enter Team/Player for Deep Comparison:", placeholder="e.g. Celtic, Mbappe, Man Utd")
 
 if query:
-    matches = [m for m in st.session_state.news_data if query.lower() in m['t'].lower()]
+    matches = [m for m in st.session_state.full_feed if query.lower() in m['t'].lower()]
     
     if matches:
         st.success(f"Verified by {len(matches)} sources.")
+        
+        # Display Clickable Source Links
+        st.write("🔗 **Official Source Links:**")
+        cols = st.columns(len(matches[:5])) # Show first 5 links as buttons
+        for idx, m in enumerate(matches[:5]):
+            cols[idx].link_button(f"Read on {m['s']}", m['l'])
+
         if st.button("🚀 GENERATE COMPILED REPORTS"):
-            with st.spinner("Analyzing and Synthesizing..."):
-                source_list = [m['s'] for m in matches]
+            with st.spinner("Analyzing current events vs history..."):
                 urls = [m['l'] for m in matches]
-                content_blocks = get_deep_content(urls)
+                source_names = [m['s'] for m in matches]
+                main_data, hist_data = get_deep_and_history(urls)
                 
-                # Format Tags
-                tags = f"#Football #Soccer #TransferNews #{query.replace(' ', '')} " + " ".join([f"#{s.replace(' ', '').replace('.','')}" for s in source_list])
+                # Hashtag Block
+                tags = f"#Soccer #Football #Analysis #{query.replace(' ', '')} " + " ".join([f"#{s.replace(' ', '').replace('.','')}" for s in source_names])
 
-                # --- 1. DEEP SUMMARY ---
-                deep_summary = f"📑 **DEEP INTELLIGENCE REPORT: {query.upper()}** 📑\n\n"
-                deep_summary += f"Our AI Newsroom has cross-referenced reports from {', '.join(source_list)} to provide this comprehensive update.\n\n"
-                
-                for block in content_blocks:
-                    if block:
-                        deep_summary += f"🏟️ **ANALYSIS:** {block[0][:300]}...\n\n"
-                        if len(block) > 1:
-                            deep_summary += f"🔍 **KEY DETAIL:** {block[1][:250]}...\n\n"
-                
-                deep_summary += f"📈 **MARKET IMPACT:** This development is shifting the title race/transfer market significantly. {len(matches)} outlets confirm the urgency of this situation.\n\n"
-                deep_summary += f"🔗 Sources: {', '.join(urls[:2])}\n\n{tags}"
+                # --- 1. DEEP SUMMARY (With History) ---
+                history_section = ""
+                if hist_data:
+                    history_section = f"📜 **HISTORICAL CONTEXT:**\n{hist_data[0][:350]}...\n\n"
+                else:
+                    history_section = "📜 **HISTORICAL CONTEXT:** This appears to be a fresh development with no direct historical match-up mentioned in current reports.\n\n"
 
-                # --- 2. QUICK SUMMARY ---
-                quick_summary = (
-                    f"⚡ **QUICK SCOUT ALERT: {query.upper()}** ⚡\n\n"
-                    f"🟢 **SITUATION:** {matches[0]['t']}\n"
-                    f"🟢 **CONSENSUS:** Verified by {len(matches)} sources ({', '.join(source_list[:2])}).\n"
-                    f"🟢 **ACTION:** Watch this space as details develop.\n\n"
-                    f"👇 Read more at links in bio!\n\n{tags}"
+                deep_summary = (
+                    f"📑 **DEEP INTELLIGENCE REPORT: {query.upper()}** 📑\n\n"
+                    f"Our Newsroom has cross-referenced {len(matches)} sources ({', '.join(source_names[:3])}).\n\n"
+                    f"🏟️ **THE CURRENT SITUATION:**\n{main_data[0] if main_data else 'Details pending.'}\n\n"
+                    f"{history_section}"
+                    f"📈 **MARKET VERDICT:** The consensus across {len(matches)} outlets suggests significant impact on the upcoming schedule.\n\n"
+                    f"🔗 **READ FULL STORIES:**\n" + "\n".join([f"- {m['l']}" for m in matches[:2]]) + 
+                    f"\n\n{tags}"
                 )
 
-                # --- DISPLAY ---
-                st.markdown("### 📋 Choice 1: Deep Intelligence (Long-Form)")
+                # --- 2. QUICK SUMMARY (Fast Read) ---
+                quick_summary = (
+                    f"⚡ **QUICK SCOUT ALERT: {query.upper()}** ⚡\n\n"
+                    f"🟢 **STATUS:** {matches[0]['t']}\n"
+                    f"🟢 **HISTORY:** {'Historical trend detected' if hist_data else 'New development'}\n"
+                    f"🟢 **CONSENSUS:** Confirmed by {len(matches)} global networks.\n\n"
+                    f"👇 CLICKABLE LINKS IN BIO!\n\n{tags}"
+                )
+
+                # --- OUTPUT ---
+                st.divider()
+                st.subheader("📋 Deep Intelligence (Long-Form)")
                 st.code(deep_summary, language="markdown")
                 
-                st.markdown("### 📋 Choice 2: Quick Scout (Short-Form)")
+                st.subheader("📋 Quick Scout (Short-Form)")
                 st.code(quick_summary, language="markdown")
 
     else:
-        st.error("No recent stories found for that topic in the 20 sources.")
+        st.warning(f"No active news for '{query}' in the last 24 hours. Try another term.")
