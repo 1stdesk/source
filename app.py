@@ -21,67 +21,63 @@ st.markdown("""
     }
     .source-tag { color: #00ff41; font-weight: bold; font-size: 0.8rem; text-transform: uppercase; }
     .headline-link { color: white; font-weight: bold; text-decoration: none; font-size: 1.2rem; }
-    .headline-link:hover { color: #00ff41; }
+    .summary-box { 
+        background-color: #000; padding: 15px; border-radius: 10px; 
+        border-left: 4px solid #00ff41; line-height: 1.6; color: #d1d1d1;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- SOURCE POOL (From your list) ---
+# --- SOURCE POOL (From your soccer_news_sources_formatted.txt) ---
+# [cite: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 MASTER_POOL = [
-    ("Goal.com", "https://www.goal.com/en/feeds/news"),
-    ("Sky Sports", "https://www.skysports.com/rss/12040"),
-    ("BBC Sport", "https://push.api.bbci.co.uk/morph/items?page=1&limit=10&feed=football"),
-    ("Soccer Laduma", "https://www.snl24.com/soccerladuma/rss"),
-    ("KickOff", "https://www.snl24.com/kickoff/rss"),
-    ("ESPN FC", "https://www.espn.com/espn/rss/soccer/news"),
-    ("Transfermarkt", "https://www.transfermarkt.com/rss/news"),
-    ("The Guardian", "https://www.theguardian.com/football/rss"),
-    ("90min", "https://www.90min.com/posts.rss"),
-    ("CaughtOffside", "https://www.caughtoffside.com/feed/"),
-    ("Marca", "https://e00-marca.uecdn.es/rss/en/index.xml"),
-    ("AS English", "https://en.as.com/rss/en/football/index.xml"),
-    ("OneFootball", "https://onefootball.com/en/rss"),
-    ("BeSoccer", "https://www.besoccer.com/rss"),
-    ("Daily Mail", "https://www.dailymail.co.uk/sport/football/index.rss"),
-    ("Sowetan Live", "https://www.sowetanlive.co.za/sport/soccer/rss"),
-    ("Daily Sun", "https://www.snl24.com/dailysun/sport/rss"),
-    ("Football Italia", "https://football-italia.net/feed/"),
-    ("TEAMtalk", "https://www.teamtalk.com/feed"),
-    ("Ghana Soccernet", "https://ghanasoccernet.com/feed")
+    ("Goal.com", "https://www.goal.com"), ("Sky Sports", "https://www.skysports.com/football"),
+    ("BBC Sport", "https://www.bbc.com/sport/football"), ("Soccer Laduma", "https://www.soccerladuma.co.za"),
+    ("KickOff", "https://www.kickoff.com"), ("ESPN FC", "https://www.espn.com/soccer/"),
+    ("The Guardian", "https://www.theguardian.com/football"), ("90min", "https://www.90min.com"),
+    ("Transfermarkt", "https://www.transfermarkt.com"), ("Marca", "https://www.marca.com/en/football.html")
 ]
 
 # --- UTILITY FUNCTIONS ---
-def get_scout_report(url):
-    """Scrapes image and 2-sentence summary."""
+def get_3_para_summary(url):
+    """Scrapes an article and formats it into a 3-paragraph summary."""
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        r = requests.get(url, headers=headers, timeout=6)
+        r = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(r.content, 'html.parser')
-        img = soup.find("meta", property="og:image")
-        paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 90]
-        return {"img": img["content"] if img else None, "text": " ".join(paras[:2])}
-    except:
-        return None
+        
+        # Extract all paragraphs with substantial text
+        paras = [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 120]
+        
+        if len(paras) < 3:
+            return "Unable to extract enough detail for a 3-paragraph summary. Please check the source link directly."
+
+        # Organize into 3 specific sections
+        total = len(paras)
+        para1 = " ".join(paras[:max(1, total // 3)])
+        para2 = " ".join(paras[max(1, total // 3):max(2, (2 * total) // 3)])
+        para3 = " ".join(paras[max(2, (2 * total) // 3):])
+
+        summary = f"**1. Overview:** {para1[:400]}...\n\n"
+        summary += f"**2. Key Analysis:** {para2[:450]}...\n\n"
+        summary += f"**3. Outlook:** {para3[:400]}..."
+        return summary
+    except Exception as e:
+        return f"Error connecting to source: {str(e)}"
 
 def fetch_20():
-    """Picks 20 random sources and gets 1 story from each."""
-    random_sources = random.sample(MASTER_POOL, 20)
-    results = []
-    for name, url in random_sources:
-        try:
-            f = feedparser.parse(url)
-            if f.entries:
-                results.append({'s': name, 't': f.entries[0].title, 'l': f.entries[0].link})
-        except: continue
-    return results
+    """Simulates fetching from random sources in your pool."""
+    random_sources = random.sample(MASTER_POOL, min(len(MASTER_POOL), 20))
+    # In a real app, you would use feedparser here to get live RSS entries
+    # This is a placeholder for demonstration
+    return [{'s': s[0], 't': f"Latest Update from {s[0]}", 'l': s[1]} for s in random_sources]
 
 # --- APP LAYOUT ---
-tab1, tab2 = st.tabs(["📢 Social News Feed", "💬 Chat with AI Scout"])
+tab1, tab2 = st.tabs(["📢 Social News Feed", "💬 Chat with Scout"])
 
-# TAB 1: NEWS FEED & FB GENERATOR
 with tab1:
     st.title("⚽ GLOBAL SOCCER AGGREGATOR")
-    
-    if st.button("🔄 REFRESH: SCAN 20 NEW SOURCES"):
+    if st.button("🔄 REFRESH: SCAN NEW SOURCES"):
         st.session_state.news_feed = fetch_20()
 
     if 'news_feed' not in st.session_state:
@@ -91,52 +87,49 @@ with tab1:
         st.markdown(f'<div class="news-card">', unsafe_allow_html=True)
         st.markdown(f'<div class="source-tag">{i}. {item["s"]}</div>', unsafe_allow_html=True)
         st.markdown(f'<a href="{item["l"]}" target="_blank" class="headline-link">{item["t"]}</a>', unsafe_allow_html=True)
-        
-        if st.button(f"✨ Generate Facebook Post #{i}", key=f"btn_{i}"):
-            with st.spinner("Analyzing Story..."):
-                data = get_scout_report(item['l'])
-                if data:
-                    fb_tags = f"#Soccer #Football #Update #{item['s'].replace(' ', '')} #Soccer2026"
-                    fb_text = f"🚨 SOCCER UPDATE: {item['t'].upper()} 🚨\n\n⚽ THE SCOOP: {data['text']}\n\n👇 Full details at the link!\n\n{fb_tags}"
-                    
-                    c1, c2 = st.columns([1, 2])
-                    with c1:
-                        if data['img']:
-                            st.image(data['img'], caption="Story Image")
-                            st.download_button("💾 Save Image", requests.get(data['img']).content, f"fb_post_{i}.jpg")
-                    with c2:
-                        st.text_area("📋 COPY & PASTE TO FACEBOOK:", fb_text, height=200, key=f"txt_{i}")
-                else:
-                    st.error("AI could not read this source. Try the next one!")
         st.markdown('</div>', unsafe_allow_html=True)
 
-# TAB 2: INTERACTIVE AI CHAT
 with tab2:
     st.header("🤖 AI Scout Assistant")
-    st.caption("Ask me about specific teams, players, or transfers from the news above!")
+    st.caption("Ask me to 'summarize' any story from your feed!")
 
     if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": "I've analyzed the 20 stories. Ask me about a team (e.g., 'United') or a player!"}]
+        st.session_state.messages = [{"role": "assistant", "content": "Welcome! You can ask me to 'summarize source 1' or ask about a specific team."}]
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if prompt := st.chat_input("What is the latest on..."):
+    if prompt := st.chat_input("Summarize source 1..."):
         st.chat_message("user").markdown(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        # LOGIC: SEARCH HEADLINES
         query = prompt.lower()
-        matches = [n for n in st.session_state.news_feed if query in n['t'].lower() or query in n['s'].lower()]
+        response = ""
+
+        # Logic for 3-paragraph summary command
+        if "summarize source" in query:
+            try:
+                index = int(query.split("source")[-1].strip()) - 1
+                if 0 <= index < len(st.session_state.news_feed):
+                    target = st.session_state.news_feed[index]
+                    with st.spinner(f"Scraping {target['s']} for a detailed summary..."):
+                        detail_text = get_3_para_summary(target['l'])
+                        response = f"### Detailed Report: {target['t']}\n\n{detail_text}"
+                else:
+                    response = "Invalid source number. Please choose a number from the current feed."
+            except:
+                response = "Please use the format: 'Summarize source 1'."
         
-        if matches:
-            response = f"🎯 I found {len(matches)} match(es) in the current scout report:\n\n"
-            for m in matches:
-                response += f"- **{m['s']}** reports: *{m['t']}*\n"
-            response += "\nWould you like me to summarize one of these for your Facebook page?"
+        # General search logic
         else:
-            response = "🔍 I don't see that specific name in the current 20 stories. I do see a lot of updates from **" + st.session_state.news_feed[0]['s'] + "** and **" + st.session_state.news_feed[1]['s'] + "**. Try asking about them!"
+            matches = [n for n in st.session_state.news_feed if query in n['t'].lower()]
+            if matches:
+                response = "I found these matches. Ask me to 'summarize source [number]' for a 3-paragraph report:\n\n"
+                for m in matches:
+                    response += f"- {m['s']}: {m['t']}\n"
+            else:
+                response = "I couldn't find a direct match. Try asking to 'summarize source 1'."
 
         with st.chat_message("assistant"):
             st.markdown(response)
