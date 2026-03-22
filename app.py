@@ -4,115 +4,102 @@ import requests
 from bs4 import BeautifulSoup
 from transformers import pipeline
 import hashlib
-import pandas as pd
+import os
 
-# --- CONFIG ---
-st.set_page_config(page_title="Soccer Scout AI v3", page_icon="⚽", layout="wide")
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Soccer Scout AI v3.1", page_icon="⚽", layout="wide")
 
-# --- AI SETUP (Cached to prevent reloading) ---
+# --- AI SETUP (Self-Healing) ---
 @st.cache_resource
 def load_summarizer():
-    # Using a fast, distilled model perfect for cloud hosting
-    return pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+    try:
+        # We specify the model directly and let the pipeline infer the task
+        # This bypasses the KeyError: 'summarization'
+        pipe = pipeline(
+            model="sshleifer/distilbart-cnn-12-6", 
+            device=-1  # Force CPU for Streamlit Cloud
+        )
+        return pipe
+    except Exception as e:
+        st.error(f"AI Loading Error: {e}")
+        return None
 
+# Global access to the model
 summarizer = load_summarizer()
 
-# --- SCRAPER LOGIC ---
+# --- UTILS ---
 class SoccerScraper:
-    def __init__(self, sources_file="sources.txt"):
-        try:
-            with open(sources_file, "r") as f:
-                self.sources = [line.strip() for line in f if line.strip()]
-        except FileNotFoundError:
-            self.sources = ["https://www.goal.com/en/feeds/news"] # Fallback
+    def fetch_rss(self):
+        # Default reliable sources
+        feeds = [
+            "https://www.goal.com/en/feeds/news",
+            "https://www.skysports.com/rss/12040",
+            "https://www.theguardian.com/football/rss"
+        ]
+        results = []
+        for url in feeds:
+            try:
+                f = feedparser.parse(url)
+                for entry in f.entries[:5]:
+                    results.append({
+                        "id": hashlib.md5(entry.link.encode()).hexdigest(),
+                        "title": entry.title,
+                        "link": entry.link,
+                        "source": url.split('/')[2]
+                    })
+            except: continue
+        return results
 
-    def get_content(self, url):
+    def get_full_text(self, url):
         try:
             r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
             soup = BeautifulSoup(r.content, 'html.parser')
-            # Extract high-res image
-            img_tag = soup.find("meta", property="og:image")
-            img = img_tag["content"] if img_tag else None
-            # Extract text
-            paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 50]
-            text = " ".join(paras[:3])
-            return text, img
+            img = soup.find("meta", property="og:image")
+            paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 60]
+            return " ".join(paras[:3]), (img["content"] if img else None)
         except:
             return "", None
 
-    def fetch(self):
-        results = []
-        for url in self.sources:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:3]: # Top 3 from each source
-                results.append({
-                    "id": hashlib.md5(entry.link.encode()).hexdigest(),
-                    "title": entry.title,
-                    "link": entry.link,
-                    "source": url.split('/')[2],
-                    "published": entry.get('published', 'N/A')
-                })
-        return results
+# --- UI ---
+st.title("⚽ Pro Soccer Scout AI")
 
-# --- STYLING ---
-st.markdown("""
-    <style>
-    .reportview-container { background: #0e1117; }
-    .news-card {
-        background-color: #161b22;
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 5px solid #238636;
-        margin-bottom: 20px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- APP INTERFACE ---
-st.title("⚽ Pro Soccer Scout AI: Global Feed")
-st.sidebar.header("Scout Controls")
-auto_refresh = st.sidebar.checkbox("Auto-Summarize News", value=True)
+# Sidebar Debug
+with st.sidebar:
+    st.header("System Status")
+    if summarizer:
+        st.success("✅ AI Engine Online")
+    else:
+        st.error("❌ AI Engine Offline")
+    
+    if st.button("Clear Cache & Reload"):
+        st.cache_resource.clear()
+        st.rerun()
 
 scraper = SoccerScraper()
 
-if 'news_data' not in st.session_state:
-    with st.spinner("Fetching latest pitch reports..."):
-        st.session_state.news_data = scraper.fetch()
+if 'news' not in st.session_state:
+    st.session_state.news = scraper.fetch_rss()
 
-if st.sidebar.button("🔄 Refresh Feed"):
-    st.session_state.news_data = scraper.fetch()
-    st.rerun()
-
-# --- DISPLAY FEED ---
-for i, item in enumerate(st.session_state.news_data):
-    with st.container():
-        st.markdown(f"""
-            <div class="news-card">
-                <small style="color: #8b949e;">{item['source']} | {item['published']}</small>
-                <h3 style="margin-top: 0;">{item['title']}</h3>
-            </div>
-        """, unsafe_allow_html=True)
-        
+# Display News
+for item in st.session_state.news:
+    with st.expander(f"{item['source'].upper()} | {item['title']}"):
         col1, col2 = st.columns([1, 2])
         
-        # Action Button to Analyze
-        if col1.button(f"✨ Generate AI Report", key=f"ai_{item['id']}"):
-            with st.spinner("AI is reading the article..."):
-                raw_text, img_url = scraper.get_content(item['link'])
-                
-                if img_url:
-                    st.image(img_url, use_container_width=True)
-                
-                if len(raw_text) > 100:
-                    summary = summarizer(raw_text[:1024], max_length=60, min_length=30)[0]['summary_text']
-                    st.info(f"**AI SUMMARY:** {summary}")
+        if col1.button("Analyze with AI", key=f"btn_{item['id']}"):
+            if not summarizer:
+                st.warning("AI model not loaded. Check logs.")
+            else:
+                with st.spinner("Scouting article content..."):
+                    text, img = scraper.get_full_text(item['link'])
+                    if img: st.image(img)
                     
-                    # Copyable Text Area
-                    st.text_area("Copy for Social Media", 
-                                value=f"🚨 UPDATE: {item['title']}\n\n📝 {summary}\n\nSource: {item['link']}", 
-                                height=100)
-                else:
-                    st.warning("Article content too short for AI analysis.")
+                    if len(text) > 100:
+                        # Use generic __call__ to ensure compatibility
+                        summary = summarizer(text[:1024], max_length=50, min_length=20)[0]
+                        # Support both old and new output formats
+                        sum_text = summary.get('summary_text') or summary.get('generated_text')
+                        st.info(f"**AI Summary:** {sum_text}")
+                    else:
+                        st.write("Content too short to summarize.")
         
-        col2.markdown(f"[Read Full Article]({item['link']})")
-        st.divider()
+        col2.markdown(f"[Read Source Article]({item['link']})")
