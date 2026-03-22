@@ -4,3 +4,4 @@ torch
 feedparser
 requests
 beautifulsoup4
+sentencepiece
