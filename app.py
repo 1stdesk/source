@@ -5,81 +5,131 @@ import hashlib
 import time
 import random
 
-# --- CONFIG ---
-st.set_page_config(page_title="NEO-SCOUT // AI_READER_V8.6", page_icon="📡", layout="wide")
+# --- FUTURISTIC UI CONFIG ---
+st.set_page_config(page_title="NEO-SCOUT // AI_READER", page_icon="📡", layout="wide")
 
-# --- THE "READER" ENGINE (Replaces BeautifulSoup) ---
-def get_clean_intel(url):
-    """Uses Jina AI Reader to get clean Markdown instead of messy HTML."""
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+    .stApp { background-color: #050505; font-family: 'JetBrains Mono', monospace; }
+    h1, h2, h3, p, span, div { color: #00ff41 !important; text-shadow: 0 0 5px #00ff41; }
+    .stElementContainer div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #0a0a0a !important;
+        border: 1px solid #00ff41 !important;
+        padding: 20px; border-radius: 2px; margin-bottom: 20px;
+    }
+    .intel-label { color: #ff0055 !important; font-weight: bold; font-size: 0.8rem; text-transform: uppercase; }
+    .intel-box { background-color: #001a00; border-left: 4px solid #00ff41; padding: 15px; margin: 10px 0; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- NEW AI READER ENGINE ---
+def get_clean_markdown(url):
+    """Bypasses messy HTML by using an AI Reader to get clean text."""
     try:
-        # Prepend r.jina.ai to get an LLM-ready version of the page
+        # Prepending r.jina.ai acts as an AI-friendly proxy
         reader_url = f"https://r.jina.ai/{url}"
-        response = requests.get(reader_url, timeout=10)
-        if response.status_code == 200:
-            return response.text # This is now clean, beautiful Markdown
-    except Exception as e:
-        st.error(f"Scrape Error: {e}")
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(reader_url, timeout=10, headers=headers)
+        if r.status_code == 200:
+            return r.text
+    except:
+        return ""
     return ""
 
-# --- THE STRUCTURED AI ---
-def query_ai_report(clean_text):
-    """Directs the AI to fill our specific buckets."""
+# --- STRUCTURED AI ANALYZER ---
+def query_ai_report(text):
     API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+    if "HF_TOKEN" not in st.secrets: return "ERROR: TOKEN_NOT_FOUND"
+    
     headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
+    # We feed the top of the article for 'What Happened' and 'History'
+    payload = {
+        "inputs": text[:1200], 
+        "parameters": {"do_sample": False, "max_length": 180, "min_length": 90}
+    }
     
-    # We take the top of the clean text (Facts) and the middle (Context)
-    # Since it's Markdown, the AI understands headers and lists much better!
-    prompt_input = clean_text[:1200] 
-    
-    payload = {"inputs": prompt_input, "parameters": {"max_length": 160, "min_length": 80}}
-    
-    try:
-        r = requests.post(API_URL, headers=headers, json=payload, timeout=15)
-        summary = r.json()[0]['summary_text']
-        return summary
-    except:
-        return "System timeout. Manual extraction required."
+    for i in range(2):
+        try:
+            r = requests.post(API_URL, headers=headers, json=payload, timeout=15)
+            res = r.json()
+            if isinstance(res, list):
+                summary = res[0]['summary_text']
+                # Smart Splitting Logic for your 3 categories
+                sentences = summary.split(". ")
+                return {
+                    "event": sentences[0] if len(sentences) > 0 else "Analysis pending.",
+                    "analysis": sentences[1] if len(sentences) > 1 else "Developing situation.",
+                    "history": ". ".join(sentences[2:]) if len(sentences) > 2 else "Historical context in archives."
+                }
+            time.sleep(3)
+        except: continue
+    return None
 
-# --- UI LOGIC ---
+# --- DATA STREAM ---
+@st.cache_data(ttl=300)
+def get_live_stream():
+    sources = [
+        "https://www.goal.com/en/feeds/news",
+        "https://www.skysports.com/rss/12040",
+        "https://feeds.bbci.co.uk/sport/football/rss.xml",
+        "https://www.theguardian.com/football/rss"
+    ]
+    random.shuffle(sources)
+    stream = []
+    for url in sources[:3]: # Take 3 random sources per refresh
+        f = feedparser.parse(url)
+        for entry in f.entries[:4]:
+            stream.append({
+                "id": hashlib.md5(entry.link.encode()).hexdigest(), 
+                "title": entry.title.upper(), 
+                "link": entry.link, 
+                "src": url.split('/')[2].upper()
+            })
+    return stream
+
+# --- MAIN INTERFACE ---
 st.title("📡 NEO-SCOUT // AI_READER_V8.6")
 
-# RSS Feed logic (Simplified for this example)
-feed = feedparser.parse("https://www.goal.com/en/feeds/news")
+if st.button("🔄 RE-SCAN ALL NODES"):
+    st.cache_data.clear()
+    st.rerun()
 
-for entry in feed.entries[:3]:
+news_stream = get_live_stream()
+
+for item in news_stream:
     with st.container(border=True):
-        st.subheader(entry.title.upper())
+        st.markdown(f"<span class='intel-label'>NODE: {item['src']}</span>", unsafe_allow_html=True)
+        st.subheader(item['title'])
         
-        if st.button("🔬 GENERATE SMART REPORT", key=hashlib.md5(entry.link.encode()).hexdigest()):
-            with st.spinner(">> AI IS READING THE PAGE..."):
-                # STEP 1: Get Clean Data
-                markdown_content = get_clean_intel(entry.link)
+        if st.button("🔬 GENERATE_DEEP_REPORT", key=item['id']):
+            with st.spinner(">> AI IS READING SOURCE CONTENT..."):
+                # 1. Get AI-ready text
+                clean_text = get_clean_markdown(item['link'])
                 
-                if markdown_content:
-                    # STEP 2: AI Summary
-                    ai_result = query_ai_report(markdown_content)
+                if len(clean_text) > 200:
+                    # 2. Process through BART
+                    report = query_ai_report(clean_text)
                     
-                    # STEP 3: The Structured Implementation
-                    # We split the AI result into the format you requested
-                    parts = ai_result.split(". ")
-                    
-                    event = parts[0] if len(parts) > 0 else "Analysis pending."
-                    analysis = parts[1] if len(parts) > 1 else "Developing story."
-                    history = parts[2] if len(parts) > 2 else "Check archives for deeper context."
-
-                    st.markdown(f"""
-                    ### 📍 [THE_EVENT]
-                    {event}.
-
-                    ### 🧠 [SYSTEM_ANALYSIS]
-                    {analysis}.
-
-                    ### 📜 [HISTORICAL_CONTEXT]
-                    {history}.
-                    """)
-                    
-                    # Social Format
-                    final_post = f"⚽ {entry.title}\n\n📍 EVENT: {event}\n\n🧠 ANALYSIS: {analysis}\n\n📜 HISTORY: {history}\n\n#Football #Viral"
-                    st.text_area(">> READY TO POST:", value=final_post, height=200)
+                    if report:
+                        st.markdown(f"""
+                            <div class="intel-box">
+                                <strong>📍 [THE_EVENT]</strong><br>{report['event']}.<br><br>
+                                <strong>🧠 [SYSTEM_ANALYSIS]</strong><br>{report['analysis']}.<br><br>
+                                <strong>📜 [HISTORICAL_CONTEXT]</strong><br>{report['history']}
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Ready for Social Media Copy-Paste
+                        ready_post = (f"⚽ {item['title']}\n\n"
+                                     f"📍 EVENT: {report['event']}\n\n"
+                                     f"🧠 ANALYSIS: {report['analysis']}\n\n"
+                                     f"📜 HISTORY: {report['history']}\n\n"
+                                     f"#Football #ViralNews #NeoScout")
+                        
+                        st.text_area(">> BROADCAST_READY:", value=ready_post, height=250)
                 else:
-                    st.error("Could not bypass site security.")
+                    st.error(">> ERROR: SOURCE_ENCRYPTED_OR_BLOCKED")
+
+st.markdown("---")
+st.write(">> SYSTEM_ONLINE // AI_READER_ACTIVE")
