@@ -5,10 +5,9 @@ import hashlib
 from bs4 import BeautifulSoup
 import time
 import random
-import re
 
 # --- CONFIG ---
-st.set_page_config(page_title="NEO-SCOUT // V8.1_CLEAN", page_icon="📡", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT // V8.2", page_icon="📡", layout="wide")
 
 st.markdown("""
     <style>
@@ -21,127 +20,113 @@ st.markdown("""
         box-shadow: 0 0 15px rgba(0, 255, 65, 0.2);
         padding: 20px; border-radius: 2px; margin-bottom: 20px;
     }
-    .intel-box {
-        background-color: #001a00; border-left: 4px solid #00ff41;
-        padding: 15px; margin: 10px 0; font-size: 0.95rem; color: #d1ffd1 !important;
-    }
+    .node-label { color: #ff0055 !important; font-weight: bold; font-size: 0.8rem; border: 1px solid #ff0055; padding: 2px 5px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- SANITIZED SCRAPER ---
+# --- SCRAPER & AI FUNCTIONS (Sanitized from previous step) ---
 def scrape_intel(url):
-    """Scrapes and purges 'Noise' like attendance, vs stats, and ads."""
     try:
         r = requests.get(url, timeout=7, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(r.content, 'html.parser')
-        
-        # Metadata image
         img = soup.find("meta", property="og:image")
-        img_url = img["content"] if img else None
-
-        # Content Extraction & Cleaning
-        # We target specific junk keywords common in sports reporting
-        junk_keywords = ["attendance:", "vs", "kick-off", "referee:", "match report", "copyright"]
-        
+        junk_keywords = ["attendance:", "vs", "kick-off", "referee:", "copyright"]
         paragraphs = []
         for p in soup.find_all('p'):
-            text = p.get_text().strip()
-            
-            # 1. Remove messy whitespace/tabs
-            text = " ".join(text.split())
-            
-            # 2. Filter: Must be long enough AND not contain junk keywords
+            text = " ".join(p.get_text().split())
             if len(text) > 80 and not any(junk in text.lower() for junk in junk_keywords):
                 paragraphs.append(text)
-        
-        # Combine the best 4 paragraphs for the AI to analyze
-        sanitized_content = " ".join(paragraphs[:4])
-        return sanitized_content, img_url
-    except Exception as e:
-        return "", None
+        return " ".join(paragraphs[:4]), (img["content"] if img else None)
+    except: return "", None
 
-# --- AI CORE WITH BACKOFF ---
 def query_ai_deep(text):
     API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
     if "HF_TOKEN" not in st.secrets: return "ERROR: TOKEN_NOT_FOUND"
-    
     headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
-    payload = {
-        "inputs": text[:1024], # BART limit
-        "parameters": {"do_sample": False, "max_length": 150, "min_length": 60}
-    }
-
-    # Retry logic if model is loading
-    for _ in range(3):
+    payload = {"inputs": text[:1024], "parameters": {"max_length": 150, "min_length": 60}}
+    for _ in range(2):
         try:
             r = requests.post(API_URL, headers=headers, json=payload, timeout=15)
             res = r.json()
             if isinstance(res, list): return res[0]['summary_text']
-            time.sleep(5)
+            time.sleep(3)
         except: continue
-        
-    # Smart Fallback: If AI fails, take the first two cleaned sentences
-    sentences = text.split(". ")
-    return f"[AUTO_GEN]: {'. '.join(sentences[:2])}."
+    return f"[AUTO_GEN]: {'. '.join(text.split('. ')[:2])}."
 
-# --- VIRAL TAG ENGINE ---
-def generate_viral_tags(title):
-    base = ["#SportsTok", "#FootballNews", "#ViralSports", "#GameChanger"]
-    if "CELTIC" in title: base += ["#CelticFC", "#SPFL"]
-    if "BEATEN" in title or "DROP" in title: base += ["#ShockResult", "#TitleRace"]
-    return " ".join(random.sample(list(set(base)), k=min(len(base), 6)))
+# --- MULTI-SOURCE ENGINE ---
+@st.cache_data(ttl=300)
+def get_randomized_feed():
+    # 10+ Diverse Global Sources
+    feed_pool = [
+        "https://www.goal.com/en/feeds/news",
+        "https://www.skysports.com/rss/12040",
+        "https://api.foxsports.com/v1/rss?partnerKey=zBaFxYLoverq&tag=soccer",
+        "https://www.espn.com/espn/rss/soccer/news",
+        "https://feeds.bbci.co.uk/sport/football/rss.xml",
+        "https://www.fifa.com/rss/index.xml",
+        "https://www.football365.com/feed",
+        "https://www.90min.com/posts.rss",
+        "https://www.caughtoffside.com/feed/",
+        "https://www.theguardian.com/football/rss"
+    ]
+    
+    # Shuffle the list of URLs so different sources appear at the top
+    random.shuffle(feed_pool)
+    
+    full_stream = []
+    # Only process the first 5-6 random sources to keep it fast
+    for url in feed_pool[:6]: 
+        try:
+            f = feedparser.parse(url)
+            source_name = url.split('/')[2].replace('www.', '').upper()
+            for entry in f.entries[:3]: # Take 3 hottest stories from each random source
+                full_stream.append({
+                    "id": hashlib.md5(entry.link.encode()).hexdigest(),
+                    "title": entry.title.upper(),
+                    "link": entry.link,
+                    "src": source_name
+                })
+        except: continue
+    
+    # Final shuffle of the individual stories
+    random.shuffle(full_stream)
+    return full_stream
 
-# --- FEED HANDLER ---
-@st.cache_data(ttl=600)
-def get_live_stream():
-    feeds = ["https://www.goal.com/en/feeds/news", "https://www.skysports.com/rss/12040"]
-    stream = []
-    for url in feeds:
-        f = feedparser.parse(url)
-        for entry in f.entries[:6]:
-            stream.append({
-                "id": hashlib.md5(entry.link.encode()).hexdigest(), 
-                "title": entry.title.upper(), 
-                "link": entry.link, 
-                "src": url.split('/')[2].upper()
-            })
-    return stream
+# --- UI INTERFACE ---
+st.title("📡 NEO-SCOUT // MULTI-NODE_V8.2")
 
-# --- UI MAIN ---
-st.title("📡 NEO-SCOUT // V8.1_CLEAN_EDITION")
-
-if st.button("🔄 SYSTEM_RELOAD"):
+# Refresh Logic
+if st.button("🔄 RE-SCAN_SATELLITE_FEED"):
     st.cache_data.clear()
     st.rerun()
 
-for item in get_live_stream():
+news_stream = get_randomized_feed()
+
+st.write(f">> {len(news_stream)} INTEL_PACKETS_INTERCEPTED")
+
+for item in news_stream:
     with st.container(border=True):
-        st.write(f"NODE: {item['src']}")
+        st.markdown(f'<span class="node-label">NODE: {item["src"]}</span>', unsafe_allow_html=True)
         st.subheader(item['title'])
         
-        if st.button("🔬 EXTRACT_INTEL", key=item['id']):
-            with st.spinner(">> PURGING_NOISE_AND_ANALYZING..."):
+        if st.button("🔬 DECRYPT_REPORT", key=item['id']):
+            with st.spinner(">> ANALYZING_SOURCE_DATA..."):
                 clean_text, image = scrape_intel(item['link'])
-                
                 if image: st.image(image, use_container_width=True)
                 
                 if len(clean_text) > 100:
                     summary = query_ai_deep(clean_text)
-                    hashtags = generate_viral_tags(item['title'])
+                    st.info(summary)
                     
-                    st.markdown(f"""
-                        <div class="intel-box">
-                            <strong>[AI_SCOUT_REPORT]</strong><br><br>
-                            {summary}<br><br>
-                            <span style="color: #00d4ff;">{hashtags}</span>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    
-                    st.text_area(">> COPY_FOR_UPLOAD:", 
-                                value=f"⚽ {item['title']}\n\n{summary}\n\n{hashtags}\n\nRead more: {item['link']}", 
-                                height=200)
+                    # Social Post Construction
+                    tags = "#SportsNews #Viral #Football " + f"#{item['src'].split('.')[0]}"
+                    st.text_area(">> BROADCAST_READY:", 
+                                value=f"📡 {item['title']}\n\n{summary}\n\n{tags}", 
+                                height=150)
                 else:
-                    st.warning(">> ERROR: SOURCE_PROTECTED_OR_NO_TEXT")
+                    st.error(">> ACCESS_DENIED: DATA_ENCRYPTED_OR_EMPTY")
+        
+        st.markdown(f"[>> SOURCE_LINK]({item['link']})")
 
 st.markdown("---")
-st.write(">> SYSTEM_ONLINE // NOISE_FILTER_ACTIVE")
+st.write(">> SYSTEM_ACTIVE // ALL_NODES_OPERATIONAL")
