@@ -3,22 +3,36 @@ import feedparser
 import requests
 from bs4 import BeautifulSoup
 import random
-import base64
 
 # --- CONFIG ---
-st.set_page_config(page_title="Global Soccer Scout 2026", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="Soccer AI Scout 2026", page_icon="⚽", layout="wide")
 
+# Matrix/Dark Theme
 st.markdown("""
     <style>
     .main { background-color: #050505; }
-    .stButton>button { background-color: #00ff41; color: black; font-weight: bold; }
-    .news-card { background-color: #121212; padding: 15px; border-radius: 8px; border: 1px solid #333; margin-bottom: 10px; }
-    .source-tag { color: #00ff41; font-size: 0.8rem; font-weight: bold; }
-    .summary-text { color: #ccc; font-size: 0.9rem; line-height: 1.4; margin: 10px 0; font-family: sans-serif; }
+    .news-card { 
+        background-color: #121212; 
+        padding: 15px; 
+        border-radius: 10px; 
+        border: 1px solid #333; 
+        margin-bottom: 15px;
+    }
+    .source-tag { color: #00ff41; font-weight: bold; font-size: 0.8rem; }
+    .summary-box { 
+        color: #d1d1d1; 
+        font-size: 0.9rem; 
+        background-color: #1a1a1a; 
+        padding: 10px; 
+        border-radius: 5px;
+        margin-top: 10px;
+    }
+    .headline-link { color: white; font-weight: bold; text-decoration: none; font-size: 1.1rem; }
+    .headline-link:hover { color: #00ff41; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 20+ GLOBAL SOURCES ---
+# 20+ Global Soccer Sources
 MASTER_SOURCES = [
     ("Soccer Laduma", "https://www.snl24.com/soccerladuma/rss"),
     ("BBC Football", "https://push.api.bbci.co.uk/morph/items?page=1&limit=10&feed=football"),
@@ -39,76 +53,72 @@ MASTER_SOURCES = [
     ("Sowetan Live", "https://www.sowetanlive.co.za/sport/soccer/rss"),
     ("Google: Transfers", "https://news.google.com/rss/search?q=soccer+transfers+when:1h&hl=en-US&gl=US&ceid=US:en"),
     ("Google: Premier League", "https://news.google.com/rss/search?q=premier+league+news+when:1h&hl=en-US&gl=US&ceid=US:en"),
-    ("Google: PSL News", "https://news.google.com/rss/search?q=PSL+soccer+South+Africa+when:1h&hl=en-ZA&gl=ZA&ceid=ZA:en"),
-    ("Google: Champions League", "https://news.google.com/rss/search?q=champions+league+when:1h&hl=en-US&gl=US&ceid=US:en"),
-    ("Daily Mail", "https://www.dailymail.co.uk/sport/football/index.rss")
+    ("Google: PSL News", "https://news.google.com/rss/search?q=PSL+soccer+South+Africa+when:1h&hl=en-ZA&gl=ZA&ceid=ZA:en")
 ]
 
-def get_article_details(url):
-    """Scrapes images and text. Handles Google News redirects."""
+def get_ai_scout_data(url):
+    """Follows redirects and grabs the story's main image and summary."""
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        # Check if it's a Google News redirect and follow it
-        r = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
+        # allow_redirects=True is CRITICAL for Google News links
+        r = requests.get(url, headers=headers, timeout=7, allow_redirects=True)
         soup = BeautifulSoup(r.content, 'html.parser')
         
-        # Image
-        img_tag = soup.find("meta", property="og:image")
-        img_url = img_tag["content"] if img_tag else None
+        # 1. Grab Main Story Image
+        img_url = None
+        img_meta = soup.find("meta", property="og:image")
+        if img_meta:
+            img_url = img_meta["content"]
         
-        # Summary
-        paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 70]
-        summary = " ".join(paras[:3])
+        # 2. Grab Short Summary (First 2-3 significant paragraphs)
+        paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 80]
+        summary = " ".join(paras[:2]) # Short and sweet
         
-        return {"img": img_url, "summary": summary if summary else "Content is protected or hidden behind a paywall."}
+        return {"img": img_url, "text": summary}
     except:
         return None
 
-def fetch_random_20():
-    """Shuffles and picks 20 fresh items across sources."""
-    shuffled_sources = list(MASTER_SOURCES)
-    random.shuffle(shuffled_sources)
-    final_list = []
-    
-    for name, url in shuffled_sources:
-        if len(final_list) >= 20: break
+def refresh_pool():
+    shuffled = list(MASTER_SOURCES)
+    random.shuffle(shuffled)
+    news = []
+    for name, url in shuffled:
+        if len(news) >= 20: break
         try:
             f = feedparser.parse(url)
-            if f.entries:
-                # Take 1-2 newest per source to ensure 20 distinct sources/stories
-                for entry in f.entries[:2]:
-                    if len(final_list) >= 20: break
-                    final_list.append({'s': name, 't': entry.title, 'l': entry.link})
+            for entry in f.entries[:1]: # Take the absolute freshest story
+                news.append({'s': name, 't': entry.title, 'l': entry.link})
         except: continue
-    return final_list
+    return news
 
 # --- UI ---
-st.title("⚽ GLOBAL SOCCER SCOUT: 2026")
+st.title("⚽ GLOBAL SOCCER AI SCOUT")
 
-if st.button("🔄 SHUFFLE & FETCH 20 NEW SOURCES"):
-    st.session_state.news_items = fetch_random_20()
+if st.button("🔄 SHUFFLE 20 NEW STORIES"):
+    st.session_state.news_feed = refresh_pool()
 
-if 'news_items' not in st.session_state:
-    st.session_state.news_items = fetch_random_20()
+if 'news_feed' not in st.session_state:
+    st.session_state.news_feed = refresh_pool()
 
-for idx, item in enumerate(st.session_state.news_items, 1):
-    with st.container():
-        st.markdown(f'<div class="news-card">', unsafe_allow_html=True)
-        st.markdown(f'<div class="source-tag">{idx}. {item["s"].upper()}</div>', unsafe_allow_html=True)
-        st.markdown(f'<a href="{item["l"]}" target="_blank" style="color:white; font-weight:bold; text-decoration:none; font-size:1.1rem;">{item["t"]}</a>', unsafe_allow_html=True)
-        
-        if st.button(f"🧠 Summarize & Grab Image #{idx}", key=f"btn_{idx}"):
-            with st.spinner("Decoding link and analyzing..."):
-                details = get_article_details(item['l'])
-                if details:
-                    c1, c2 = st.columns([1, 2])
-                    with c1:
-                        if details['img']:
-                            st.image(details['img'], use_container_width=True)
-                            img_data = requests.get(details['img']).content
-                            st.download_button("💾 Download", img_data, f"soccer_{idx}.jpg", "image/jpeg")
-                    with c2:
-                        st.markdown(f'<div class="summary-text">{details["summary"]}</div>', unsafe_allow_html=True)
-                else:
-                    st.error("This specific story is blocked from AI summary. Click the headline to read.")
-        st.markdown('</div>', unsafe_allow_html=True)
+for i, item in enumerate(st.session_state.news_feed, 1):
+    st.markdown(f'<div class="news-card">', unsafe_allow_html=True)
+    st.markdown(f'<div class="source-tag">{i}. {item["s"].upper()}</div>', unsafe_allow_html=True)
+    st.markdown(f'<a href="{item["l"]}" target="_blank" class="headline-link">{item["t"]}</a>', unsafe_allow_html=True)
+    
+    # Process Button
+    if st.button(f"🧠 Summarize Story #{i}", key=f"btn_{i}"):
+        with st.spinner("Analyzing source..."):
+            data = get_ai_scout_data(item['l'])
+            if data:
+                col_img, col_txt = st.columns([1, 3])
+                with col_img:
+                    if data['img']:
+                        st.image(data['img'], use_container_width=True)
+                        # Quick download for the image
+                        img_res = requests.get(data['img']).content
+                        st.download_button("💾 Save Image", img_res, f"soccer_pic_{i}.jpg", "image/jpeg")
+                with col_txt:
+                    st.markdown(f'<div class="summary-box"><b>AI SUMMARY:</b><br>{data["text"]}</div>', unsafe_allow_html=True)
+            else:
+                st.error("Could not summarize. The site might be blocking AI access.")
+    st.markdown('</div>', unsafe_allow_html=True)
