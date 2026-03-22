@@ -1,84 +1,148 @@
 import streamlit as st
-import feedparser
 import requests
-from bs4 import BeautifulSoup
-from transformers import pipeline, AutoModelForSeq2SeqLM, AutoTokenizer
+import feedparser
 import hashlib
+from bs4 import BeautifulSoup
+import time
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Soccer Scout AI v5.0", page_icon="⚽")
+st.set_page_config(
+    page_title="Pro Soccer Scout AI", 
+    page_icon="⚽", 
+    layout="wide"
+)
 
-# --- AI SETUP (The "Task-Agnostic" Way) ---
-@st.cache_resource
-def load_summarizer():
+# --- STYLING ---
+st.markdown("""
+    <style>
+    .main { background-color: #0d1117; }
+    .stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #238636; color: white; }
+    .report-box { background-color: #161b22; padding: 20px; border-radius: 10px; border: 1px solid #30363d; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- AI API LOGIC ---
+def query_ai(text):
+    """Sends text to Hugging Face Inference API for summarization."""
+    # Using the BART model via API to save local memory
+    API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+    
+    # Check if Secret is set
+    if "HF_TOKEN" not in st.secrets:
+        return "❌ Error: HF_TOKEN not found in Streamlit Secrets."
+    
+    headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
+    payload = {
+        "inputs": text[:1024], # API limit is usually 1024 tokens
+        "parameters": {"do_sample": False, "max_length": 80, "min_length": 30}
+    }
+
     try:
-        model_id = "sshleifer/distilbart-cnn-6-6"
-        # Manually load to bypass the "Unknown task" error
-        tokenizer = AutoTokenizer.from_pretrained(model_id)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+        response = requests.post(API_URL, headers=headers, json=payload)
+        result = response.json()
         
-        # We tell the pipeline EXACTLY what model and tokenizer to use
-        return pipeline(
-            "summarization", 
-            model=model, 
-            tokenizer=tokenizer, 
-            framework="pt"
-        )
+        # Handle API 'Warming Up' state
+        if isinstance(result, dict) and "estimated_time" in result:
+            wait_time = int(result['estimated_time'])
+            return f"⏳ AI is warming up on the server. Please wait {wait_time}s and click 'Analyze' again."
+        
+        return result[0]['summary_text']
     except Exception as e:
-        st.sidebar.error(f"AI Boot Error: {e}")
-        return None
+        return f"⚠️ AI Connection Error: {str(e)}"
 
-# Load the engine
-ai_scout = load_summarizer()
+# --- SCRAPER FUNCTIONS ---
+def fetch_news():
+    """Fetches latest soccer news from top RSS feeds."""
+    feeds = [
+        "https://www.goal.com/en/feeds/news",
+        "https://www.skysports.com/rss/12040",
+        "https://www.theguardian.com/football/rss"
+    ]
+    articles = []
+    for url in feeds:
+        try:
+            f = feedparser.parse(url)
+            for entry in f.entries[:5]:
+                articles.append({
+                    "id": hashlib.md5(entry.link.encode()).hexdigest(),
+                    "title": entry.title,
+                    "link": entry.link,
+                    "source": url.split('/')[2],
+                    "date": entry.get('published', 'Recently')
+                })
+        except:
+            continue
+    return articles
 
-# --- SCRAPER ---
-def get_news():
-    feeds = ["https://www.goal.com/en/feeds/news", "https://www.skysports.com/rss/12040"]
-    data = []
-    for f_url in feeds:
-        feed = feedparser.parse(f_url)
-        for entry in feed.entries[:5]:
-            data.append({
-                "id": hashlib.md5(entry.link.encode()).hexdigest(),
-                "title": entry.title,
-                "link": entry.link,
-                "source": f_url.split('/')[2]
-            })
-    return data
-
-def scrape_content(url):
+def get_article_data(url):
+    """Scrapes the main image and body text from the article link."""
     try:
-        r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        r = requests.get(url, timeout=5, headers=headers)
         soup = BeautifulSoup(r.content, 'html.parser')
-        text = " ".join([p.get_text() for p in soup.find_all('p')[:3]])
-        img = soup.find("meta", property="og:image")
-        return text, (img["content"] if img else None)
-    except: return "", None
-
-# --- UI LAYOUT ---
-st.title("⚽ Soccer Scout AI")
-
-if 'feed' not in st.session_state:
-    st.session_state.feed = get_news()
-
-for item in st.session_state.feed:
-    with st.container(border=True):
-        st.subheader(item['title'])
-        st.caption(f"Source: {item['source']}")
         
-        if st.button("Analyze Story", key=item['id']):
-            if ai_scout:
-                with st.spinner("AI is scouting the details..."):
-                    raw_text, img_url = scrape_content(item['link'])
-                    if img_url: st.image(img_url, width=400)
+        # Find high-res image
+        img_tag = soup.find("meta", property="og:image")
+        img = img_tag["content"] if img_tag else None
+        
+        # Get first 3 paragraphs for the AI to read
+        paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 50]
+        text = " ".join(paras[:3])
+        
+        return text, img
+    except:
+        return "", None
+
+# --- MAIN UI ---
+st.title("⚽ Global Soccer Scout AI")
+st.subheader("Near Real-Time Intelligence & AI Summaries")
+
+# Sidebar
+with st.sidebar:
+    st.header("Scout Settings")
+    if st.button("🔄 Refresh News Feed"):
+        st.session_state.feed = fetch_news()
+        st.rerun()
+    st.info("AI summaries are generated using the Facebook BART model via Hugging Face API.")
+
+# Initialize Feed
+if 'feed' not in st.session_state:
+    with st.spinner("Initial news sweep..."):
+        st.session_state.feed = fetch_news()
+
+# Display Articles
+for item in st.session_state.feed:
+    with st.container():
+        # Clean UI Card
+        st.markdown(f"### {item['title']}")
+        st.caption(f"📍 {item['source'].upper()} | 🕒 {item['date']}")
+        
+        col1, col2 = st.columns([1, 4])
+        
+        with col1:
+            if st.button("🔍 Analyze Story", key=item['id']):
+                with st.spinner("AI is reading..."):
+                    raw_text, img_url = get_article_data(item['link'])
+                    
+                    if img_url:
+                        st.image(img_url, use_container_width=True)
                     
                     if len(raw_text) > 100:
-                        # Generation parameters to ensure quality
-                        summary = ai_scout(raw_text[:1024], max_length=50, min_length=20, do_sample=False)
-                        st.success(f"**The Scoop:** {summary[0]['summary_text']}")
+                        summary = query_ai(raw_text)
+                        st.markdown(f"""
+                            <div class="report-box">
+                                <strong>AI SCOUT REPORT:</strong><br>{summary}
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Copy/Paste Helper
+                        st.text_area("Copy Report", 
+                                    value=f"🚨 UPDATE: {item['title']}\n\n📝 {summary}\n\n🔗 {item['link']}", 
+                                    height=100)
                     else:
-                        st.warning("Article too short for AI analysis.")
-            else:
-                st.error("AI Engine is currently offline. Check logs.")
+                        st.warning("Article body is too short or blocked for AI analysis.")
         
-        st.markdown(f"[Read full story]({item['link']})")
+        with col2:
+            st.markdown(f"[View Original Article]({item['link']})")
+        
+        st.divider()
