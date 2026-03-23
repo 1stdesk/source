@@ -37,7 +37,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ────────────────────────────────────────────────
-#               CACHED AI SUMMARY  ← FIXED: removed hash_funcs
+#               CACHED AI SUMMARY
 # ────────────────────────────────────────────────
 @st.cache_data(ttl=3600)
 def get_ai_summary(text: str) -> str:
@@ -115,24 +115,49 @@ def extract_youtube_id(video_url):
     return None
 
 # ────────────────────────────────────────────────
-#               CACHED WEB IMAGE SEARCH
+#               CACHED WEB IMAGE SEARCH – IMPROVED QUERY
 # ────────────────────────────────────────────────
 @st.cache_data(ttl=1800)
 def get_web_story_images(title: str):
     try:
-        query = f'"{title}" soccer OR football (photo OR image OR gallery OR action OR highlight)'
-        with DDGS() as ddgs:
-            results = list(ddgs.images(query, max_results=5, safesearch="off"))
-        urls = [r["image"] for r in results if r.get("image", "").startswith("http")]
+        clean_title = title.replace('"', '').strip()
         
+        # Tighter query — focuses on real match/action photos, excludes common junk
+        query = (
+            f'"{clean_title}" '
+            f'(soccer OR football) '
+            f'(match OR action OR player OR goal OR celebration OR stadium) '
+            f'(photo OR picture OR image OR shot OR gallery) '
+            f'-stock -shutterstock -getty -istock -alamy -cartoon -illustration -vector -meme -ai -generated -logo'
+        )
+
+        with DDGS() as ddgs:
+            results = list(ddgs.images(query, max_results=10, safesearch="off"))
+
+        urls = []
         seen = set()
-        unique = []
-        for u in urls:
-            if u not in seen:
-                seen.add(u)
-                unique.append(u)
-        return unique[:3]
-    except:
+        for r in results:
+            img = r.get("image", "")
+            if not img or not img.startswith("http"):
+                continue
+            if img in seen:
+                continue
+            
+            lower = img.lower()
+            # Extra client-side rejection of common irrelevant sources
+            if any(bad in lower for bad in [
+                "stock", "shutterstock", "gettyimages", "istockphoto", "alamy", 
+                "meme", "cartoon", "ai generated", "vector", "illustration"
+            ]):
+                continue
+            
+            seen.add(img)
+            urls.append(img)
+            if len(urls) >= 3:
+                break
+
+        return urls[:3]
+    except Exception:
         return []
 
 # ────────────────────────────────────────────────
@@ -236,7 +261,7 @@ def get_live_stream():
 #               MAIN INTERFACE
 # ────────────────────────────────────────────────
 st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_v7.1 – SPEED EDITION")
-st.markdown("**SOCCER-ONLY • CACHED AI + ALWAYS SHOW WEB IMAGES + SCRAPING**")
+st.markdown("**SOCCER-ONLY • CACHED AI + IMPROVED WEB IMAGES + SCRAPING**")
 st.markdown("---")
 
 col_header, col_ref = st.columns([5, 1])
@@ -283,7 +308,7 @@ for item in filtered_stream:
                             st.info("No images found in original article")
                         
                         if web_images:
-                            st.write("**🌐 ADDITIONAL IMAGES FROM WEB SOURCES**")
+                            st.write("**🌐 ADDITIONAL IMAGES FROM WEB SOURCES** (improved relevance)")
                             cols = st.columns(min(3, len(web_images)))
                             for idx, img_url in enumerate(web_images):
                                 with cols[idx]:
@@ -293,7 +318,7 @@ for item in filtered_stream:
                                         st.caption("Image failed to load")
                                     st.markdown(f"[📥]({img_url})")
                         else:
-                            st.info("No additional web images found")
+                            st.info("No relevant web images found")
                         
                         if len(raw_text) > 180:
                             report = get_ai_summary(raw_text)
@@ -334,4 +359,4 @@ for item in filtered_stream:
             st.markdown(f"[>> FULL ARTICLE]({item['link']})")
 
 st.markdown("---")
-st.caption("v7.1 • Heavy caching • Web images always shown • Reduced API load • Fixed recursion error")
+st.caption("v7.1 • Heavy caching • Stricter web image search • Reduced off-topic results")
