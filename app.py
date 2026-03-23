@@ -2,12 +2,13 @@ import streamlit as st
 import requests
 import feedparser
 import hashlib
+import time
 from duckduckgo_search import DDGS
 
 # ────────────────────────────────────────────────
 #               CYBERPUNK UI CONFIG
 # ────────────────────────────────────────────────
-st.set_page_config(page_title="NEO-SCOUT • v8.6", page_icon="⚽️", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT • v8.7", page_icon="⚽️", layout="wide")
 
 st.markdown("""
 <style>
@@ -19,48 +20,76 @@ h1, h2 { font-family: 'Orbitron', sans-serif; background: linear-gradient(90deg,
 .stButton > button:hover { background: linear-gradient(45deg, #00f0ff, #c300ff); color: #000; box-shadow: 0 0 15px #00f0ff; }
 .card { background: rgba(20,10,40,0.85); backdrop-filter: blur(12px); border: 1px solid #00f0ff33; 
         border-radius: 16px; padding: 1.5rem; margin-bottom: 1.5rem; }
-.intel-box { background: rgba(25,10,45,0.95); border-left: 5px solid #00f0ff; padding: 1.2rem; border-radius: 10px; color: #00f0ff; font-family: 'Roboto Mono', monospace; }
 .fb-ready { background: #1877F222; border: 1px dashed #1877F2; padding: 15px; border-radius: 10px; margin-top: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ────────────────────────────────────────────────
-#               NEURAL & SCRAPE CORES
+#               PRO-LEVEL NEURAL CORE
 # ────────────────────────────────────────────────
 
 @st.cache_data(ttl=1800)
 def firecrawl_scrape(url):
-    """Scrapes clean Markdown and Meta Image from Firecrawl."""
+    """Scrapes clean Markdown using Firecrawl."""
     if "FIRECRAWL_KEY" not in st.secrets:
         return "Missing FIRECRAWL_KEY", None
     headers = {"Authorization": f"Bearer {st.secrets['FIRECRAWL_KEY']}", "Content-Type": "application/json"}
     payload = {"url": url, "formats": ["markdown"], "onlyMainContent": True}
     try:
-        r = requests.post("https://api.firecrawl.dev/v1/scrape", json=payload, headers=headers, timeout=20)
+        r = requests.post("https://api.firecrawl.dev/v1/scrape", json=payload, headers=headers, timeout=30)
         if r.ok:
             data = r.json().get("data", {})
             img = data.get("metadata", {}).get("og:image")
             return data.get("markdown", ""), img
-        return f"Scrape Failed: {r.status_code}", None
-    except: return "Connection Error", None
+        return None, None
+    except: return None, None
 
-@st.cache_data(ttl=1800)
-def bart_fb_summary(text, title):
-    """Summarizes text via BART and appends Facebook formatting/hashtags."""
-    if not text or len(text) < 100: return "Data stream too weak for analysis."
+def bart_detailed_summary(text, title):
+    """
+    Enhanced BART summarizer with 'Wait for Model' logic and 
+    richer detail parameters to prevent 'Neural Timeout'.
+    """
+    if not text or len(text) < 200:
+        return "⚠️ Data stream insufficient. The article might be behind a paywall or too short."
     
     api_url = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
     headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
-    payload = {"inputs": text[:3000], "parameters": {"max_length": 130, "min_length": 60}}
+    
+    # parameters tuned for BETTER, LONGER summaries
+    payload = {
+        "inputs": text[:4000],
+        "parameters": {
+            "max_length": 250,      # Increased for more detail
+            "min_length": 100,     # Forced depth
+            "do_sample": False,
+            "repetition_penalty": 1.2
+        },
+        "options": {
+            "wait_for_model": True  # CRITICAL: Prevents 'Neural Core Timeout'
+        }
+    }
     
     try:
+        # Initial attempt
         r = requests.post(api_url, headers=headers, json=payload)
-        summary = r.json()[0]['summary_text'] if r.ok else "Neural Core Timeout."
+        res = r.json()
         
-        # Post-Processing: Create the Facebook-ready block
-        fb_post = f"🚨 SOCCER UPDATE: {title}\n\n{summary}\n\n⚽ #SoccerNews #FootballUpdate #BreakingNews #MatchDay"
-        return fb_post
-    except: return "BART Neural Link Severed."
+        if r.status_code == 200 and isinstance(res, list):
+            summary = res[0]['summary_text']
+            # Format for Facebook
+            fb_post = f"🚨 SOCCER UPDATE: {title}\n\n{summary}\n\n⚽ #SoccerNews #FootballUpdate #BreakingNews #MatchDay"
+            return fb_post
+        elif "estimated_time" in res:
+            # If model is still loading, wait and try once more
+            wait_time = res["estimated_time"]
+            st.warning(f"🧠 Neural Core is warming up... waiting {int(wait_time)}s")
+            time.sleep(wait_time)
+            r = requests.post(api_url, headers=headers, json=payload)
+            return r.json()[0]['summary_text']
+        else:
+            return f"❌ Neural Core Busy: {res.get('error', 'Unknown Error')}"
+    except Exception as e:
+        return f"🛠️ System Error: {str(e)}"
 
 # ────────────────────────────────────────────────
 #               FEED & MAIN UI
@@ -80,8 +109,8 @@ def get_soccer_feed():
         except: pass
     return items[:15]
 
-st.title("⚽️ NEO-SCOUT • v8.6")
-st.caption("FIRE-BART SYSTEM // FACEBOOK POST GENERATOR")
+st.title("⚡️ NEO-SCOUT • v8.7")
+st.caption("ENHANCED NEURAL RELIABILITY // FB POST GENERATOR")
 
 feed = get_soccer_feed()
 
@@ -93,12 +122,15 @@ for entry in feed:
             st.subheader(entry["title"])
             st.caption(f"📡 SOURCE: {entry['source']}")
         with col2:
-            btn = st.button("🚀 SCAN & GENERATE", key=entry["id"])
+            btn = st.button("🚀 DEEP ANALYSIS", key=entry["id"])
 
         if btn:
-            with st.spinner("🧬 Extracting & Formatting for Social..."):
+            with st.spinner("🧬 Extracting clean data via Firecrawl..."):
                 content, thumb = firecrawl_scrape(entry["link"])
-                fb_final = bart_fb_summary(content, entry["title"])
+            
+            if content:
+                with st.spinner("🧠 Generating detailed neural summary..."):
+                    fb_final = bart_detailed_summary(content, entry["title"])
                 
                 res_col1, res_col2 = st.columns([1, 2])
                 with res_col1:
@@ -106,16 +138,12 @@ for entry in feed:
                 
                 with res_col2:
                     st.markdown("### 📱 FACEBOOK POST READY")
-                    st.info("Copy the text below for your post:")
-                    
-                    # This is the "Copy and Paste" text box
-                    # Streamlit's st.code has a built-in copy button in the top right!
                     st.code(fb_final, language="text")
-                    
-                    st.markdown(f'<div class="intel-box">{fb_final}</div>', unsafe_allow_html=True)
+            else:
+                st.error("🚫 Firecrawl could not reach the article. It may be restricted.")
         
         st.markdown('</div>', unsafe_allow_html=True)
 
 st.sidebar.markdown("### 🛰 SYSTEM STATUS")
-st.sidebar.write("🟢 Firecrawl: Active" if "FIRECRAWL_KEY" in st.secrets else "🔴 Firecrawl: Missing Key")
-st.sidebar.write("🟢 BART-CNN: Active" if "HF_TOKEN" in st.secrets else "🔴 BART-CNN: Missing Token")
+st.sidebar.write("🟢 Firecrawl: Connected" if "FIRECRAWL_KEY" in st.secrets else "🔴 Firecrawl: Key Missing")
+st.sidebar.write("🟢 BART-CNN: Active" if "HF_TOKEN" in st.secrets else "🔴 BART-CNN: Token Missing")
