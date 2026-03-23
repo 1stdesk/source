@@ -4,15 +4,12 @@ import feedparser
 import hashlib
 import random
 import time
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
-import streamlit.components.v1 as components
 from duckduckgo_search import DDGS
 
 # ────────────────────────────────────────────────
-#               CYBERPUNK DESIGN v8.1
+#               CYBERPUNK DESIGN v8.2
 # ────────────────────────────────────────────────
-st.set_page_config(page_title="NEO-SCOUT • v8.1", page_icon="⚡️", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT • v8.2", page_icon="⚡️", layout="wide")
 
 st.markdown("""
 <style>
@@ -31,24 +28,10 @@ h1, h2 { font-family: 'Orbitron', sans-serif; background: linear-gradient(90deg,
 # ────────────────────────────────────────────────
 #               HELPERS
 # ────────────────────────────────────────────────
-def smart_get(url):
-    time.sleep(random.uniform(1, 3))
-    headers = {"User-Agent": random.choice([
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-    ])}
-    for prefix in ["https://archive.is/", "https://12ft.io/"]:
-        try:
-            r = requests.get(prefix + url, headers=headers, timeout=10)
-            if r.ok and len(r.text) > 600: return r
-        except: pass
-    try:
-        return requests.get(url, headers=headers, timeout=10)
-    except:
-        return None
 
 @st.cache_data(ttl=1800)
 def ai_topic(title):
+    # Keeping Flan-T5 here because BART is strictly for summaries, not instruction-following.
     if "HF_TOKEN" not in st.secrets:
         return title[:60]
     try:
@@ -83,24 +66,38 @@ def get_two_relevant_images(title):
     except:
         return []
 
+# ────── NEW: FIRECRAWL SCRAPER ──────
 @st.cache_data(ttl=1800)
 def scrape_article(url):
-    r = smart_get(url)
-    if not r: return "", [], None
-    soup = BeautifulSoup(r.content, "html.parser")
-    text = " ".join([p.get_text(strip=True) for p in soup.find_all("p") if len(p.get_text(strip=True)) > 45][:7])
+    if "FIRECRAWL_KEY" not in st.secrets:
+        return "🔒 Missing FIRECRAWL_KEY in secrets.toml", [], None
+        
+    headers = {
+        "Authorization": f"Bearer {st.secrets['FIRECRAWL_KEY']}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "url": url,
+        "formats": ["markdown"]
+    }
+    
+    try:
+        r = requests.post("https://api.firecrawl.dev/v1/scrape", json=payload, headers=headers, timeout=30)
+        if r.ok:
+            data = r.json().get("data", {})
+            text = data.get("markdown", "")
+            meta = data.get("metadata", {})
+            
+            # Firecrawl easily pulls the meta images for us
+            head_img = meta.get("og:image") or meta.get("twitter:image")
+            
+            return text, [head_img] if head_img else [], head_img
+        else:
+            return f"⚠️ Firecrawl Error: {r.status_code} - {r.text}", [], None
+    except Exception as e:
+        return f"Error: {str(e)}", [], None
 
-    # Head thumbnail from article
-    head_img = None
-    for prop in ["og:image", "twitter:image"]:
-        m = soup.find("meta", property=prop)
-        if m and (v := m.get("content")) and v.startswith("http"):
-            head_img = v
-            break
-    return text, [head_img] if head_img else [], head_img
-
-
-# ────── NEW: FIXED NEURAL SUMMARY (this was the missing piece) ──────
+# ────── NEW: FACEBOOK BART SUMMARY ──────
 @st.cache_data(ttl=1800)
 def ai_summarize(text: str) -> str:
     if len(text.strip()) < 50:
@@ -108,26 +105,28 @@ def ai_summarize(text: str) -> str:
     if "HF_TOKEN" not in st.secrets:
         return "🔒 Add `HF_TOKEN` to your secrets.toml for full cyberpunk AI summary.\n\n" + text[:450] + "..."
     try:
-        prompt = (
-            f"Summarize this soccer article in 80-120 words. "
-            f"Make it exciting, mention key players, score if any, and the big moment: {text[:3000]}"
-        )
+        # BART doesn't need a prompt, just the raw markdown/text
         r = requests.post(
-            "https://api-inference.huggingface.co/models/google/flan-t5-base",
+            "https://api-inference.huggingface.co/models/facebook/bart-large-cnn",
             headers={"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"},
-            json={"inputs": prompt}
+            json={
+                "inputs": text[:3500], # ~800 tokens, safe limit for BART
+                "parameters": {
+                    "max_length": 130, 
+                    "min_length": 40,
+                    "do_sample": False
+                }
+            }
         )
         if r.ok:
             res = r.json()
             if isinstance(res, list) and len(res) > 0:
-                return res[0].get("generated_text", res[0].get("summary_text", "Summary ready ⚡️"))
+                return res[0].get("summary_text", "Summary ready ⚡️")
             return str(res)
         else:
             return f"⚠️ HF API {r.status_code} — still shows raw text below:\n\n{text[:500]}..."
     except Exception as e:
         return f"🛠️ Neural core offline ({str(e)[:80]})\n\nFallback: {text[:400]}..."
-
-
 
 # ────────────────────────────────────────────────
 #               FEED
@@ -177,8 +176,8 @@ def get_soccer_feed():
 # ────────────────────────────────────────────────
 #               MAIN INTERFACE
 # ────────────────────────────────────────────────
-st.title("⚡️ NEO-SCOUT • v8.1 • CYBERPUNK")
-st.caption("✅ Head Thumbnail + AI-Understood 2 Relevant Pictures • **Fixed Neural Summary**")
+st.title("⚡️ NEO-SCOUT • v8.2 • CYBERPUNK")
+st.caption("✅ Firecrawl Data Extraction + Facebook BART Neural Summary")
 
 if st.button("⟲ REFRESH FEED"):
     get_soccer_feed.clear()
@@ -200,7 +199,7 @@ for entry in feed:
         c1, c2 = st.columns([1, 4])
         with c1:
             if st.button("🚀 ANALYZE ARTICLE", key=f"btn_{entry['id']}"):
-                with st.spinner("🧠 Extracting head image + AI topic + 2 pics + neural summary..."):
+                with st.spinner("🧠 Extracting via Firecrawl + processing BART summary..."):
                     text, head_list, head_img = scrape_article(entry["link"])
                     two_web = get_two_relevant_images(entry["title"])
 
@@ -222,11 +221,11 @@ for entry in feed:
                     else:
                         st.info("No matching images found")
 
-                    # 🔥 AI Summary — NOW WORKS
+                    # 🔥 AI Summary — NOW POWERED BY BART
                     summary = ai_summarize(text)
                     st.markdown(f"""
                     <div class="intel-box">
-                        <strong>🧬 NEURAL SUMMARY v8.1</strong><br><br>
+                        <strong>🧬 BART NEURAL SUMMARY</strong><br><br>
                         {summary}
                     </div>
                     """, unsafe_allow_html=True)
@@ -237,4 +236,4 @@ for entry in feed:
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
-st.caption("v8.1 • Fully working AI core • Add HF_TOKEN in secrets for best results • Enjoy the neon!")
+st.caption("v8.2 • Powered by Firecrawl & Facebook BART • Enjoy the neon!")
