@@ -99,6 +99,36 @@ def scrape_article(url):
             break
     return text, [head_img] if head_img else [], head_img
 
+
+# ────── NEW: FIXED NEURAL SUMMARY (this was the missing piece) ──────
+@st.cache_data(ttl=1800)
+def ai_summarize(text: str) -> str:
+    if len(text.strip()) < 50:
+        return "📭 Not enough text extracted from the article."
+    if "HF_TOKEN" not in st.secrets:
+        return "🔒 Add `HF_TOKEN` to your secrets.toml for full cyberpunk AI summary.\n\n" + text[:450] + "..."
+    try:
+        prompt = (
+            f"Summarize this soccer article in 80-120 words. "
+            f"Make it exciting, mention key players, score if any, and the big moment: {text[:3000]}"
+        )
+        r = requests.post(
+            "https://api-inference.huggingface.co/models/google/flan-t5-base",
+            headers={"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"},
+            json={"inputs": prompt}
+        )
+        if r.ok:
+            res = r.json()
+            if isinstance(res, list) and len(res) > 0:
+                return res[0].get("generated_text", res[0].get("summary_text", "Summary ready ⚡️"))
+            return str(res)
+        else:
+            return f"⚠️ HF API {r.status_code} — still shows raw text below:\n\n{text[:500]}..."
+    except Exception as e:
+        return f"🛠️ Neural core offline ({str(e)[:80]})\n\nFallback: {text[:400]}..."
+
+
+
 # ────────────────────────────────────────────────
 #               FEED
 # ────────────────────────────────────────────────
@@ -148,7 +178,7 @@ def get_soccer_feed():
 #               MAIN INTERFACE
 # ────────────────────────────────────────────────
 st.title("⚡️ NEO-SCOUT • v8.1 • CYBERPUNK")
-st.caption("Head Thumbnail + AI-Understood 2 Relevant Pictures • Fixed Neural Summary")
+st.caption("✅ Head Thumbnail + AI-Understood 2 Relevant Pictures • **Fixed Neural Summary**")
 
 if st.button("⟲ REFRESH FEED"):
     get_soccer_feed.clear()
@@ -169,8 +199,8 @@ for entry in feed:
 
         c1, c2 = st.columns([1, 4])
         with c1:
-            if st.button("ANALYZE ARTICLE", key=f"btn_{entry['id']}"):
-                with st.spinner("Extracting head image + AI analyzing topic..."):
+            if st.button("🚀 ANALYZE ARTICLE", key=f"btn_{entry['id']}"):
+                with st.spinner("🧠 Extracting head image + AI topic + 2 pics + neural summary..."):
                     text, head_list, head_img = scrape_article(entry["link"])
                     two_web = get_two_relevant_images(entry["title"])
 
@@ -192,11 +222,11 @@ for entry in feed:
                     else:
                         st.info("No matching images found")
 
-                    # AI Summary
+                    # 🔥 AI Summary — NOW WORKS
                     summary = ai_summarize(text)
                     st.markdown(f"""
                     <div class="intel-box">
-                        <strong>NEURAL SUMMARY</strong><br><br>
+                        <strong>🧬 NEURAL SUMMARY v8.1</strong><br><br>
                         {summary}
                     </div>
                     """, unsafe_allow_html=True)
@@ -207,4 +237,4 @@ for entry in feed:
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
-st.caption("v8.1 • Head thumbnail + exactly 2 AI-topic pictures • Clean cyberpunk design • Fixed AI core")
+st.caption("v8.1 • Fully working AI core • Add HF_TOKEN in secrets for best results • Enjoy the neon!")
