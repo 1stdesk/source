@@ -6,16 +6,15 @@ from bs4 import BeautifulSoup
 import time
 import streamlit.components.v1 as components
 from urllib.parse import urljoin
-from duckduckgo_search import DDGS   # ← NEW: for web-wide image search
+from duckduckgo_search import DDGS
 
 # --- FUTURISTIC UI CONFIG ---
-st.set_page_config(page_title="NEO-SCOUT v7.0", page_icon="📡", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT v7.1", page_icon="📡", layout="wide")
 
-# Custom CSS for Futuristic/Terminal look
+# Custom CSS (unchanged)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
-
     .stApp { background-color: #050505; font-family: 'JetBrains Mono', monospace; }
     h1, h2, h3, p, span, div { color: #00ff41 !important; text-shadow: 0 0 5px #00ff41; }
     .stElementContainer div[data-testid="stVerticalBlockBorderWrapper"] {
@@ -36,28 +35,37 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- AI CORE ---
-def query_ai_deep(text):
+# --- CACHED AI SUMMARY ---
+@st.cache_data(ttl=3600, hash_funcs={str: lambda x: hashlib.md5(x.encode()).hexdigest()})
+def get_ai_summary(text: str) -> str:
     API_URL = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn"
     if "HF_TOKEN" not in st.secrets:
         return "CRITICAL ERROR: ACCESS_TOKEN_NOT_FOUND"
+    
     headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
     payload = {
-        "inputs": text[:1500],
-        "parameters": {"do_sample": False, "max_length": 180, "min_length": 90,
-                       "repetition_penalty": 1.3, "length_penalty": 1.5}
+        "inputs": text[:1000],
+        "parameters": {
+            "do_sample": False,
+            "max_length": 140,
+            "min_length": 60,
+            "repetition_penalty": 1.2,
+            "length_penalty": 1.3
+        }
     }
-    for i in range(3):
+    for _ in range(3):
         try:
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=12)
             result = response.json()
             if isinstance(result, dict) and "estimated_time" in result:
-                time.sleep(5); continue
+                time.sleep(4)
+                continue
             return result[0]['summary_text']
-        except: continue
-    return "SYSTEM_TIMEOUT: MODEL_FAILURE"
+        except:
+            continue
+    return "SUMMARY_TIMEOUT"
 
-# --- SOCCER-ONLY FILTER ---
+# --- SOCCER FILTER ---
 def is_soccer_story(title: str) -> bool:
     if not title:
         return False
@@ -67,10 +75,9 @@ def is_soccer_story(title: str) -> bool:
         "afcon", "fifa", "psl", "kaizer chiefs", "orlando pirates", "mamelodi sundowns",
         "man united", "man city", "liverpool", "arsenal", "chelsea", "tottenham"
     ]
-    title_lower = title.lower()
-    return any(kw in title_lower for kw in keywords)
+    return any(kw in title.lower() for kw in keywords)
 
-# --- VIDEO DETECTION HELPER (unchanged) ---
+# --- VIDEO HELPERS ---
 def extract_video_info(url):
     try:
         r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
@@ -100,57 +107,35 @@ def extract_youtube_id(video_url):
     if "youtu.be/" in video_url: return video_url.split("youtu.be/")[-1].split("?")[0]
     return None
 
-# --- WEB-WIDE IMAGE SEARCH (AI-ENHANCED: headline keywords + names extraction) ---
+# --- CACHED WEB IMAGE SEARCH ---
+@st.cache_data(ttl=1800)
 def get_web_story_images(title: str):
-    """AI + keyword extraction → searches names/teams/events from headline for far better image results"""
     try:
-        # AI extracts key names & keywords from headline
-        ai_prompt = f"Extract ONLY the most important proper names, teams, players and event in maximum 8 words from this soccer headline: {title}"
-        ai_keywords = query_ai_deep(ai_prompt).strip()
-        
-        # Fallback keyword extraction if AI fails
-        words = [w.strip(".,!?") for w in title.split() if len(w) > 3]
-        name_keywords = " ".join([w for w in words if w[0].isupper() or any(k in w.lower() for k in ["vs","final","cup","league"])][:6])
-        
-        search_term = f"{ai_keywords} {name_keywords} {title}".strip()[:120]
-        
-        queries = [
-            f'"{search_term}" soccer OR football (photo OR image OR gallery OR highlight OR action)',
-            f"{ai_keywords} soccer player OR team OR stadium photo",
-            f"{name_keywords} football match photo OR press image"
-        ]
-        
-        all_urls = []
+        query = f'"{title}" soccer OR football (photo OR image OR gallery OR action OR highlight)'
         with DDGS() as ddgs:
-            for q in queries:
-                results = list(ddgs.images(q, max_results=5, safesearch="off"))
-                for r in results:
-                    img = r.get("image")
-                    if img and img.startswith("http"):
-                        all_urls.append(img)
+            results = list(ddgs.images(query, max_results=5, safesearch="off"))
+        urls = [r["image"] for r in results if r.get("image", "").startswith("http")]
         
-        # Deduplicate while preserving best order
-        seen = {}
+        seen = set()
         unique = []
-        for u in all_urls:
+        for u in urls:
             if u not in seen:
-                seen[u] = True
+                seen.add(u)
                 unique.append(u)
         return unique[:3]
     except:
         return []
 
-# --- SCRAPE ORIGINAL STORY (text + images from the source page) ---
-def scrape_story_data(url):
+# --- CACHED STORY SCRAPING ---
+@st.cache_data(ttl=1800)
+def cached_scrape_story(url: str):
     try:
-        r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
+        r = requests.get(url, timeout=6, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(r.content, 'html.parser')
         
-        # Text
         paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 60]
         raw_text = " ".join(paras[:5])
         
-        # Original source images (up to 3)
         original_images = []
         for prop in ["og:image", "og:image:secure_url", "twitter:image"]:
             meta = soup.find("meta", property=prop)
@@ -158,20 +143,22 @@ def scrape_story_data(url):
                 u = meta["content"]
                 if u.startswith("http") and u not in original_images:
                     original_images.append(u)
+        
         for img in soup.find_all("img", src=True):
             src = img["src"]
             if src.startswith("//"): src = "https:" + src
             full_src = urljoin(url, src) if not src.startswith(('http://', 'https://')) else src
+            bad = ["logo", "icon", "avatar", "pixel", "blank", "gif"]
             if (full_src not in original_images and 
                 len(original_images) < 3 and 
-                not any(bad in full_src.lower() for bad in ["logo", "icon", "avatar", "pixel", "blank", "gif"])):
+                not any(b in full_src.lower() for b in bad)):
                 original_images.append(full_src)
         
         return raw_text, original_images[:3]
     except:
         return "", []
 
-# --- 20 SOURCES → SOCCER-ONLY + MIXED BY LATEST + THUMBNAILS FROM RSS ---
+# --- CACHED RSS FEED ---
 @st.cache_data(ttl=300)
 def get_live_stream():
     feeds = [
@@ -208,9 +195,8 @@ def get_live_stream():
                 pub_time = entry.get('published_parsed') or entry.get('updated_parsed') or time.gmtime(0)
                 
                 thumbnail = None
-                media_content = getattr(entry, 'media_content', None) or entry.get('media_content')
-                if media_content:
-                    for m in media_content:
+                if hasattr(entry, 'media_content') and entry.media_content:
+                    for m in entry.media_content:
                         if m.get('url') and m.get('type', '').startswith('image'):
                             thumbnail = m['url']
                             break
@@ -232,14 +218,12 @@ def get_live_stream():
         except:
             continue
     
-    all_entries = list(seen.values())
-    all_entries.sort(key=lambda x: x[0], reverse=True)
-    stream = [item for _, item in all_entries[:60]]
-    return stream
+    all_entries = [item for _, item in sorted(seen.values(), key=lambda x: x[0], reverse=True)][:60]
+    return all_entries
 
 # --- MAIN INTERFACE ---
-st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_V7")
-st.markdown("**SOCCER-ONLY • 20 SOURCES • THUMBNAILS + ORIGINAL + WEB IMAGES (AI KEYWORD + NAMES) + AI + VIDEO**")
+st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_v7.1 – SPEED EDITION")
+st.markdown("**SOCCER-ONLY • CACHED AI + ALWAYS SHOW WEB IMAGES + SCRAPING**")
 st.markdown("---")
 
 col_header, col_ref = st.columns([5, 1])
@@ -267,11 +251,13 @@ for item in filtered_stream:
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
                 if st.button("RUN_DEEP_INTEL", key=f"ai_{item['id']}"):
-                    with st.spinner(">> DECRYPTING + SCRAPING ORIGINAL + AI KEYWORD IMAGE SEARCH..."):
-                        raw_text, original_images = scrape_story_data(item['link'])
+                    with st.spinner(">> FAST DEEP SCAN (cached where possible)..."):
+                        raw_text, original_images = cached_scrape_story(item['link'])
+                        
+                        # Web images ALWAYS fetched (as requested)
                         web_images = get_web_story_images(item['title'])
                         
-                        # ORIGINAL SOURCE IMAGES
+                        # ORIGINAL IMAGES
                         if original_images:
                             st.write("**📸 IMAGES FROM ORIGINAL SOURCE**")
                             cols = st.columns(min(3, len(original_images)))
@@ -280,61 +266,30 @@ for item in filtered_stream:
                                     try:
                                         st.image(img_url, use_container_width=True)
                                     except:
-                                        st.warning("⚠️ Image unavailable")
-                                    st.markdown(f"[📥 DOWNLOAD]({img_url})")
+                                        st.caption("Image failed to load")
+                                    st.markdown(f"[📥]({img_url})")
+                        else:
+                            st.info("No images found in original article")
                         
-                        # WEB IMAGES FROM OTHER SOURCES (NOW AI-POWERED WITH HEADLINE NAMES/KEYWORDS)
+                        # WEB IMAGES – always shown (even if original has good images)
                         if web_images:
-                            st.write("**🌐 IMAGES FROM OTHER WEB SOURCES (AI keyword + names search)**")
+                            st.write("**🌐 ADDITIONAL IMAGES FROM WEB SOURCES**")
                             cols = st.columns(min(3, len(web_images)))
                             for idx, img_url in enumerate(web_images):
                                 with cols[idx]:
                                     try:
                                         st.image(img_url, use_container_width=True)
                                     except:
-                                        st.warning("⚠️ Image unavailable")
-                                    st.markdown(f"[📥 DOWNLOAD]({img_url})")
+                                        st.caption("Image failed to load")
+                                    st.markdown(f"[📥]({img_url})")
+                        else:
+                            st.info("No additional web images found")
                         
-                        if not original_images and not web_images:
-                            st.info("No images found for this story")
-                        
-                        # AI SUMMARY
-                        if len(raw_text) > 200:
-                            report = query_ai_deep(raw_text)
+                        # CACHED AI SUMMARY
+                        if len(raw_text) > 180:
+                            report = get_ai_summary(raw_text)
                             st.markdown(f"""
                                 <div class="intel-box">
-                                    <strong>[AI_SCOUT_DEEP_REPORT]</strong><br><br>
+                                    <strong>[AI SUMMARY – CACHED]</strong><br><br>
                                     {report}
-                                </div>
-                            """, unsafe_allow_html=True)
-                        else:
-                            st.write(">> ERROR: DATA_PACKET_TOO_SMALL")
-            
-            with col_btn2:
-                if st.button("🎥 SCAN_VIDEO", key=f"vid_{item['id']}"):
-                    with st.spinner(">> SCANNING_FOR_VIDEO..."):
-                        video_url, video_type = extract_video_info(item['link'])
-                        if video_url:
-                            if video_type == "youtube":
-                                vid_id = extract_youtube_id(video_url)
-                                if vid_id:
-                                    st.success("✅ YOUTUBE HIGHLIGHT FOUND")
-                                    components.html(
-                                        f'<iframe width="100%" height="400" '
-                                        f'src="https://www.youtube.com/embed/{vid_id}" '
-                                        f'frameborder="0" allowfullscreen></iframe>',
-                                        height=420
-                                    )
-                                    st.markdown(f"[📥 Open on YouTube & Download]({video_url})")
-                            else:
-                                st.success("✅ DIRECT VIDEO FOUND")
-                                st.video(video_url)
-                                st.markdown(f"[📥 RIGHT-CLICK → SAVE VIDEO]({video_url})")
-                        else:
-                            st.info("No embedded video detected on this story")
-        
-        with c2:
-            st.markdown(f"[>> ACCESS_FULL_LINK]({item['link']})")
-
-st.markdown("---")
-st.write(">> END_OF_STREAM • ALL 3 IMAGE TYPES • WEB IMAGES NOW AI KEYWORD+NAME POWERED • VIDEO READY")
+                                </div
