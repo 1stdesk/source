@@ -2,143 +2,232 @@ import streamlit as st
 import requests
 import feedparser
 import hashlib
+from bs4 import BeautifulSoup
 import time
+import random
 
-# ────────────────────────────────────────────────
-#               CYBERPUNK UI CONFIG
-# ────────────────────────────────────────────────
-st.set_page_config(page_title="NEO-SCOUT • v9.0", page_icon="⚽️", layout="wide")
+# --- CONFIG ---
+st.set_page_config(page_title="NEO-SCOUT // V10", page_icon="📡", layout="wide")
 
+# --- STYLING ---
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Roboto+Mono:wght@400;500&display=swap');
-.stApp { background: linear-gradient(135deg, #0d0015, #120022); color: #e0e0ff; }
-h1, h2 { font-family: 'Orbitron', sans-serif; background: linear-gradient(90deg, #00f0ff, #c300ff); 
-         -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-.stButton > button { border: 2px solid #00f0ff; color: #00f0ff; background: transparent; border-radius: 12px; font-weight: 600; width: 100%; transition: 0.3s; }
-.stButton > button:hover { background: linear-gradient(45deg, #00f0ff, #c300ff); color: #000; box-shadow: 0 0 20px #00f0ff; }
-.card { background: rgba(30,10,60,0.8); backdrop-filter: blur(20px); border: 1px solid #00f0ff11; 
-        border-radius: 20px; padding: 1.8rem; margin-bottom: 1.5rem; border-left: 4px solid #00f0ff33; }
-.source-tag { background: #c300ff22; color: #c300ff; padding: 4px 12px; border-radius: 8px; font-size: 0.7rem; font-weight: bold; border: 1px solid #c300ff44; }
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+.stApp { background-color: #050505; font-family: 'JetBrains Mono', monospace; }
+h1, h2, h3, p, span, div { color: #00ff41 !important; text-shadow: 0 0 5px #00ff41; }
+.stElementContainer div[data-testid="stVerticalBlockBorderWrapper"] {
+    background-color: #0a0a0a !important;
+    border: 1px solid #00ff41 !important;
+    box-shadow: 0 0 15px rgba(0,255,65,0.2);
+    padding: 20px; border-radius: 4px; margin-bottom: 20px;
+}
+.status-tag { font-size: 0.7rem; padding: 2px 6px; border: 1px solid #00ff41; margin-bottom: 10px; display: inline-block; }
+.char-counter { font-size: 0.8rem; color: #888 !important; text-align: right; }
 </style>
 """, unsafe_allow_html=True)
 
-# ────────────────────────────────────────────────
-#               NEURAL ENGINE v9.0
-# ────────────────────────────────────────────────
+# --- REFRESH BUTTON ---
+if "refresh_key" not in st.session_state:
+    st.session_state.refresh_key = 0
 
-@st.cache_data(ttl=1800)
-def firecrawl_scrape(url):
-    if "FIRECRAWL_KEY" not in st.secrets: return None, None
-    headers = {"Authorization": f"Bearer {st.secrets['FIRECRAWL_KEY']}", "Content-Type": "application/json"}
-    payload = {"url": url, "formats": ["markdown"], "onlyMainContent": True}
-    try:
-        r = requests.post("https://api.firecrawl.dev/v1/scrape", json=payload, headers=headers, timeout=25)
-        if r.ok:
-            data = r.json().get("data", {})
-            return data.get("markdown", ""), data.get("metadata", {}).get("og:image")
-    except: pass
-    return None, None
+col1, col2 = st.columns([1, 6])
+with col1:
+    if st.button("🔄 REFRESH"):
+        st.session_state.refresh_key += 1
+        st.cache_data.clear()
+        st.rerun()
 
-def bart_dual_sentence(text, title):
-    """Refined summarizer with persistent loading retry."""
-    if not text or len(text) < 200: return "⚠️ Error: Article content too short for neural synthesis."
-    
-    api_url = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-    headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
-    payload = {
-        "inputs": text[:4500],
-        "parameters": {"max_length": 100, "min_length": 65, "repetition_penalty": 2.8},
-        "options": {"wait_for_model": True}
-    }
+# --- SMART FALLBACK ---
+def smart_fallback_summary(text):
+    sentences = text.split('. ')
+    if len(sentences) < 3:
+        return text[:200]
 
-    # Intelligent Retry Loop
-    for attempt in range(5): # Up to 5 attempts for cold models
-        try:
-            r = requests.post(api_url, headers=headers, json=payload, timeout=60)
-            res = r.json()
-            
-            # Scenario A: Success
-            if r.status_code == 200 and isinstance(res, list):
-                summary = res[0]['summary_text'].replace(' .', '.').strip()
-                return f"🚨 SOCCER UPDATE: {title}\n\n{summary}\n\n⚽ #SoccerNews #FootballUpdate #BreakingNews #MatchDay"
-            
-            # Scenario B: Model is loading (Common Error)
-            elif r.status_code == 503 or "estimated_time" in str(res):
-                wait_time = res.get("estimated_time", 20)
-                st.info(f"🧠 NEURAL CORE WAKING UP: Estimated {int(wait_time)}s remaining...")
-                time.sleep(min(wait_time, 30)) # Wait but cap it to 30s per loop
-                continue
-            
-            # Scenario C: Rate Limit
-            elif r.status_code == 429:
-                st.warning("⚠️ High traffic. Retrying in 5s...")
-                time.sleep(5)
-                continue
-        except Exception as e:
-            time.sleep(2)
-            
-    return "❌ Connection timeout. The Neural Core is currently overloaded. Please try again in 30 seconds."
+    keywords = ["goal", "transfer", "win", "loss", "injury", "deal", "match"]
+    scored = []
 
-# ────────────────────────────────────────────────
-#               ULTRA SOURCE ENGINE
-# ────────────────────────────────────────────────
-@st.cache_data(ttl=300)
-def get_ultra_feed():
-    sources = [
-        ("GOAL", "https://www.goal.com/en/feeds/news"),
-        ("SKY", "https://www.skysports.com/rss/12040"),
-        ("BBC", "https://feeds.bbci.co.uk/sport/football/rss.xml"),
-        ("GUARDIAN", "https://www.theguardian.com/football/rss"),
-        ("ESPN", "https://www.espn.com/espn/rss/soccer/news"),
-        ("90MIN", "https://www.90min.com/posts.rss")
-    ]
-    items = []
-    seen = set()
-    for name, url in sources:
-        try:
-            f = feedparser.parse(url)
-            for e in f.entries:
-                if e.link not in seen:
-                    seen.add(e.link)
-                    items.append({"title": e.title.upper(), "link": e.link, "source": name, "id": hashlib.md5(e.link.encode()).hexdigest()})
-        except: pass
-    return items[:30]
+    for s in sentences:
+        score = sum(1 for k in keywords if k in s.lower())
+        score += len(s) / 100
+        scored.append((score, s))
 
-# ────────────────────────────────────────────────
-#               MAIN INTERFACE
-# ────────────────────────────────────────────────
-st.title("⚡️ NEO-SCOUT • v9.0")
-st.caption("STABLE NEURAL BRIDGE // DUAL-SENTENCE FB GENERATOR")
+    top = sorted(scored, reverse=True)[:3]
+    return ". ".join([s[1] for s in top]).strip() + "."
 
-feed = get_ultra_feed()
-search = st.text_input("📡 FILTER GLOBAL INTEL...", "").upper()
-if search: feed = [f for f in feed if search in f['title']]
+# --- FORMAT ---
+def format_summary_output(summary, title):
+    return f"""⚽ {title}
 
-for entry in feed:
-    with st.container():
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        c_title, c_btn = st.columns([4, 1])
-        
-        with c_title:
-            st.markdown(f"**{entry['title']}**")
-            st.markdown(f"<span class='source-tag'>{entry['source']}</span>", unsafe_allow_html=True)
-        
-        with c_btn:
-            if st.button("🚀 SCAN", key=entry["id"]):
-                with st.spinner("⚡️ Scraping Source..."):
-                    content, thumb = firecrawl_scrape(entry["link"])
-                
-                if content:
-                    fb_post = bart_dual_sentence(content, entry["title"])
-                    
-                    res1, res2 = st.columns([1, 2])
-                    with res1:
-                        if thumb: st.image(thumb, use_container_width=True)
-                        else: st.warning("No image found.")
-                    with res2:
-                        st.markdown("### 📱 FACEBOOK POST")
-                        st.code(fb_post, language="text")
-                else:
-                    st.error("🚫 Source blocked the scan. Try another article.")
-        st.markdown('</div>', unsafe_allow_html=True)
+🔥 {summary}
+"""
+
+# --- AI ---
+def query_ai_deep(text, title=""):
+    API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+
+    if "HF_TOKEN" not in st.secrets:
+        return format_summary_output(smart_fallback_summary(text), title)
+
+    headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
+
+    prompt = f"""
+Summarize this football news article in 3 sharp sentences:
+1. Breaking news
+2. Key details
+3. Impact
+
+Title: {title}
+
+{text[:1200]}
+"""
+
+    payload = {
+        "inputs": prompt,
+        "parameters": {"max_length": 140, "min_length": 60}
+    }
+
+    for wait in [3, 6, 10]:
+        try:
+            r = requests.post(API_URL, headers=headers, json=payload, timeout=20)
+            res = r.json()
+
+            if isinstance(res, list):
+                return format_summary_output(res[0]['summary_text'], title)
+
+            if "estimated_time" in res:
+                time.sleep(wait)
+
+        except:
+            continue
+
+    return format_summary_output(smart_fallback_summary(text), title)
+
+@st.cache_data(ttl=3600)
+def cached_summary(text, title):
+    return query_ai_deep(text, title)
+
+# --- TAGS ---
+def generate_viral_tags(title):
+    base = ["#Football", "#SoccerNews", "#Breaking", "#Sports"]
+    t = title.lower()
+
+    if "transfer" in t:
+        base += ["#TransferNews", "#HereWeGo"]
+    if "goal" in t:
+        base += ["#Goal", "#MatchDay"]
+    if "injury" in t:
+        base += ["#InjuryUpdate"]
+
+    return " ".join(random.sample(base, k=min(5, len(base))))
+
+# --- BREAKING ---
+def is_breaking_news(title):
+    return any(k in title.upper() for k in ["BREAKING", "CONFIRMED", "DONE DEAL"])
+
+# --- 20 SOURCES ---
+@st.cache_data(ttl=600)
+def get_live_stream(refresh_key):
+    feeds = [
+        "https://www.goal.com/en/feeds/news",
+        "https://www.skysports.com/rss/12040",
+        "http://feeds.bbci.co.uk/sport/football/rss.xml",
+        "https://www.espn.com/espn/rss/soccer/news",
+        "https://www.theguardian.com/football/rss",
+        "https://talksport.com/football/feed/",
+        "https://www.90min.com/rss",
+        "https://www.fourfourtwo.com/rss",
+        "https://www.sportingnews.com/uk/rss",
+        "https://www.mirror.co.uk/sport/football/rss.xml",
+        "https://www.independent.co.uk/sport/football/rss",
+        "https://metro.co.uk/sport/football/feed/",
+        "https://www.cbssports.com/rss/headlines/soccer/",
+        "https://www.foxsports.com/soccer/rss",
+        "https://www.besoccer.com/rss/news",
+        "https://www.worldsoccertalk.com/feed/",
+        "https://www.mlssoccer.com/rss",
+        "https://www.laliga.com/rss",
+        "https://www.premierleague.com/news/rss.xml",
+        "https://www.bundesliga.com/rss/news"
+    ]
+
+    stream = []
+    for url in feeds:
+        f = feedparser.parse(url)
+        for entry in f.entries[:4]:
+            stream.append({
+                "id": hashlib.md5(entry.link.encode()).hexdigest(),
+                "title": entry.title.upper(),
+                "link": entry.link,
+                "src": url.split('/')[2].upper()
+            })
+    return stream
+
+# --- SCRAPER ---
+def scrape_intel(url):
+    try:
+        r = requests.get(url, timeout=6, headers={'User-Agent': 'Mozilla/5.0'})
+        soup = BeautifulSoup(r.content, 'html.parser')
+
+        img = soup.find("meta", property="og:image")
+
+        paras = [p.get_text().strip() for p in soup.find_all('p')]
+        paras = [p for p in paras if len(p) > 60 and "cookie" not in p.lower()]
+
+        return " ".join(paras[:6]), (img["content"] if img else None)
+
+    except:
+        return "", None
+
+# --- UI ---
+st.title("📡 NEO-SCOUT // V10 ELITE")
+
+news_stream = get_live_stream(st.session_state.refresh_key)
+
+for item in news_stream:
+    with st.container(border=True):
+
+        st.markdown(f'<div class="status-tag">NODE_{item["src"]}</div>', unsafe_allow_html=True)
+
+        if is_breaking_news(item['title']):
+            st.error("🚨 BREAKING NEWS")
+
+        st.subheader(item['title'])
+
+        if st.button("🔬 RUN INTEL", key=item['id']):
+
+            with st.spinner(">> SCANNING DATA..."):
+                raw_text, image = scrape_intel(item['link'])
+
+                if image:
+                    st.image(image, use_container_width=True)
+
+                    try:
+                        img_data = requests.get(image).content
+                        st.download_button("⬇ DOWNLOAD IMAGE", img_data, file_name="news.jpg")
+                    except:
+                        pass
+
+                if len(raw_text) > 100:
+                    summary = cached_summary(raw_text, item['title'])
+                    tags = generate_viral_tags(item['title'])
+
+                    full_post = f"{summary}\n\n{tags}"
+
+                    st.text_area(">> SOCIAL READY", value=full_post, height=200)
+                    st.code(full_post)
+
+                    char_count = len(full_post)
+
+                    st.markdown(
+                        f'<div class="char-counter">CHARS: {char_count} | '
+                        f'X: {"✅" if char_count <= 280 else "❌"} | TIKTOK: ✅</div>',
+                        unsafe_allow_html=True
+                    )
+
+                else:
+                    st.error(">> DATA TOO SHORT")
+
+        st.markdown(f"[>> SOURCE LINK]({item['link']})")
+
+st.markdown("---")
+st.write(">> SYSTEM ONLINE // NEO-SCOUT V10")
