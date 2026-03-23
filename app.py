@@ -5,6 +5,7 @@ import hashlib
 from bs4 import BeautifulSoup
 import time
 import streamlit.components.v1 as components
+from urllib.parse import urljoin   # Standard library - no extra install needed
 
 # --- FUTURISTIC UI CONFIG ---
 st.set_page_config(page_title="NEO-SCOUT v7.0", page_icon="📡", layout="wide")
@@ -68,7 +69,7 @@ def is_soccer_story(title: str) -> bool:
     title_lower = title.lower()
     return any(kw in title_lower for kw in keywords)
 
-# --- VIDEO DETECTION HELPER ---
+# --- VIDEO DETECTION HELPER (unchanged) ---
 def extract_video_info(url):
     try:
         r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
@@ -98,7 +99,48 @@ def extract_youtube_id(video_url):
     if "youtu.be/" in video_url: return video_url.split("youtu.be/")[-1].split("?")[0]
     return None
 
-# --- 20 SOURCES → SOCCER-ONLY + MIXED BY LATEST + DEDUPLICATED ---
+# --- ENHANCED SCRAPE: TEXT + UP TO 3 IMAGES + THUMBNAIL FROM RSS ---
+def scrape_intel(url):
+    try:
+        r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
+        soup = BeautifulSoup(r.content, 'html.parser')
+        
+        # Text (same as before)
+        paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 60]
+        raw_text = " ".join(paras[:5])
+        
+        # MULTIPLE IMAGES (up to 3 different pictures of the same story)
+        images = []
+        # 1. Open Graph + Twitter images (most reliable)
+        for prop in ["og:image", "og:image:secure_url", "twitter:image"]:
+            meta = soup.find("meta", property=prop)
+            if meta and meta.get("content"):
+                u = meta["content"]
+                if u.startswith("http") and u not in images:
+                    images.append(u)
+        
+        # 2. Any other image meta tags
+        for meta in soup.find_all("meta"):
+            if meta.get("property") and "image" in meta["property"].lower():
+                u = meta.get("content")
+                if u and u.startswith("http") and u not in images:
+                    images.append(u)
+        
+        # 3. Article <img> tags (real story photos)
+        for img in soup.find_all("img", src=True):
+            src = img["src"]
+            if src.startswith("//"): src = "https:" + src
+            full_src = urljoin(url, src) if not src.startswith(('http://', 'https://')) else src
+            if (full_src not in images and 
+                len(images) < 5 and 
+                not any(bad in full_src.lower() for bad in ["logo", "icon", "avatar", "pixel", "blank", "gif"])):
+                images.append(full_src)
+        
+        return raw_text, images[:3]   # ← Exactly 3 different pictures max
+    except:
+        return "", []
+
+# --- 20 SOURCES → SOCCER-ONLY + MIXED BY LATEST + THUMBNAILS FROM RSS ---
 @st.cache_data(ttl=300)
 def get_live_stream():
     feeds = [
@@ -127,7 +169,7 @@ def get_live_stream():
         ("BBC_FOOTBALL", "https://feeds.bbci.co.uk/sport/football/rss.xml")
     ]
     
-    seen = {}  # link → (pub_time, item)  → automatic deduplication
+    seen = {}
     for src_name, url in feeds:
         try:
             f = feedparser.parse(url)
@@ -136,38 +178,50 @@ def get_live_stream():
                     continue
                 link = entry.link
                 pub_time = entry.get('published_parsed') or entry.get('updated_parsed') or time.gmtime(0)
+                
+                # THUMBNAIL FROM RSS (fast, cached)
+                thumbnail = None
+                media_content = getattr(entry, 'media_content', None) or entry.get('media_content')
+                if media_content:
+                    for m in media_content:
+                        if m.get('url') and m.get('type', '').startswith('image'):
+                            thumbnail = m['url']
+                            break
+                if not thumbnail and hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
+                    thumbnail = entry.media_thumbnail[0].get('url')
+                if not thumbnail and hasattr(entry, 'enclosure') and entry.enclosure:
+                    if entry.enclosure.get('type', '').startswith('image'):
+                        thumbnail = entry.enclosure['url']
+                
                 item = {
                     "id": hashlib.md5(link.encode()).hexdigest(),
                     "title": entry.title.upper(),
                     "link": link,
-                    "src": src_name
+                    "src": src_name,
+                    "thumbnail": thumbnail
                 }
-                # Keep the version with the newest publish time if duplicate appears
+                
                 if link not in seen or pub_time > seen[link][0]:
                     seen[link] = (pub_time, item)
         except:
             continue
     
-    # Sort by latest time across ALL 20 sources
     all_entries = list(seen.values())
     all_entries.sort(key=lambda x: x[0], reverse=True)
-    
     stream = [item for _, item in all_entries[:60]]
     return stream
 
-def scrape_intel(url):
-    try:
-        r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
-        soup = BeautifulSoup(r.content, 'html.parser')
-        img = soup.find("meta", property="og:image")
-        paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 60]
-        return " ".join(paras[:5]), (img["content"] if img else None)
-    except: 
-        return "", None
+# --- VIDEO HELPERS (unchanged) ---
+def extract_youtube_id(video_url):
+    if not video_url: return None
+    if "embed/" in video_url: return video_url.split("embed/")[-1].split("?")[0].split("&")[0]
+    if "watch?v=" in video_url: return video_url.split("watch?v=")[-1].split("&")[0]
+    if "youtu.be/" in video_url: return video_url.split("youtu.be/")[-1].split("?")[0]
+    return None
 
 # --- MAIN INTERFACE ---
 st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_V7")
-st.markdown("**SOCCER-ONLY • 20 SOURCES MIXED BY LATEST • AI + VIDEO PLAY/DOWNLOAD**")
+st.markdown("**SOCCER-ONLY • 20 SOURCES MIXED BY LATEST • THUMBNAILS + 3 STORY PICTURES + AI + VIDEO**")
 st.markdown("---")
 
 col_header, col_ref = st.columns([5, 1])
@@ -184,6 +238,11 @@ filtered_stream = [n for n in news_stream if search_buf in n['title']] if search
 for item in filtered_stream:
     with st.container(border=True):
         st.write(f"SOURCE_NODE: {item['src']}")
+        
+        # THUMBNAIL (from RSS - appears instantly)
+        if item.get("thumbnail"):
+            st.image(item["thumbnail"], use_container_width=True, caption="STORY THUMBNAIL")
+        
         st.subheader(item['title'])
         
         c1, c2 = st.columns([1, 4])
@@ -192,9 +251,17 @@ for item in filtered_stream:
             with col_btn1:
                 if st.button("RUN_DEEP_INTEL", key=f"ai_{item['id']}"):
                     with st.spinner(">> DECRYPTING_AND_SUMMARIZING..."):
-                        raw_text, image = scrape_intel(item['link'])
-                        if image: 
-                            st.image(image, use_container_width=True)
+                        raw_text, images = scrape_intel(item['link'])
+                        
+                        # SHOW UP TO 3 DIFFERENT PICTURES OF THE SAME STORY
+                        if images:
+                            st.write("**3 STORY PICTURES**")
+                            cols = st.columns(min(3, len(images)))
+                            for idx, img_url in enumerate(images):
+                                with cols[idx]:
+                                    st.image(img_url, use_container_width=True)
+                                    st.markdown(f"[📥 DOWNLOAD IMAGE]({img_url})")
+                        
                         if len(raw_text) > 200:
                             report = query_ai_deep(raw_text)
                             st.markdown(f"""
@@ -233,4 +300,4 @@ for item in filtered_stream:
             st.markdown(f"[>> ACCESS_FULL_LINK]({item['link']})")
 
 st.markdown("---")
-st.write(">> END_OF_STREAM • SOCCER-ONLY • MIXED LATEST STORIES FROM 20 SOURCES • VIDEO READY")
+st.write(">> END_OF_STREAM • THUMBNAILS + 3 STORY PICTURES + VIDEO READY")
