@@ -104,7 +104,7 @@ def extract_youtube_id(video_url):
 def get_web_story_images(title: str):
     """Search DuckDuckGo Images for the exact story + soccer context → pulls photos from other sites"""
     try:
-        query = f"{title} soccer OR football news OR highlight OR photo"
+        query = f'"{title}" soccer OR football (photo OR image OR highlight OR gallery)'
         with DDGS() as ddgs:
             results = list(ddgs.images(query, max_results=6, safesearch="off"))
         urls = [r.get("image") for r in results if r.get("image") and r.get("image").startswith("http")]
@@ -224,7 +224,7 @@ st.markdown("---")
 col_header, col_ref = st.columns([5, 1])
 with col_ref:
     if st.button("🔄 REFRESH_LIST"):
-        st.cache_data.clear()
+        get_live_stream.clear()   # ← FIXED: correct way to clear this specific cache
         st.rerun()
 
 search_buf = st.text_input(">> INITIALIZE_FILTER_QUERY:", "").upper()
@@ -256,7 +256,10 @@ for item in filtered_stream:
                             cols = st.columns(min(3, len(original_images)))
                             for idx, img_url in enumerate(original_images):
                                 with cols[idx]:
-                                    st.image(img_url, use_container_width=True)
+                                    try:
+                                        st.image(img_url, use_container_width=True)
+                                    except:
+                                        st.warning("⚠️ Image unavailable")
                                     st.markdown(f"[📥 DOWNLOAD]({img_url})")
                         
                         # WEB IMAGES FROM OTHER SOURCES
@@ -265,9 +268,14 @@ for item in filtered_stream:
                             cols = st.columns(min(3, len(web_images)))
                             for idx, img_url in enumerate(web_images):
                                 with cols[idx]:
-                                    st.image(img_url, use_container_width=True)
+                                    try:
+                                        st.image(img_url, use_container_width=True)
+                                    except:
+                                        st.warning("⚠️ Image unavailable")
                                     st.markdown(f"[📥 DOWNLOAD]({img_url})")
-                        elif not original_images:
+                        
+                        # FIXED: show "no images" only when BOTH lists are empty (all 3 image types now robust)
+                        if not original_images and not web_images:
                             st.info("No images found for this story")
                         
                         # AI SUMMARY
@@ -309,4 +317,4 @@ for item in filtered_stream:
             st.markdown(f"[>> ACCESS_FULL_LINK]({item['link']})")
 
 st.markdown("---")
-st.write(">> END_OF_STREAM • ORIGINAL + OTHER WEB SOURCES IMAGES • VIDEO READY")
+st.write(">> END_OF_STREAM • ALL 3 IMAGE TYPES FIXED & ROBUST • VIDEO READY")
