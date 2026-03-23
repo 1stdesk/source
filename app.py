@@ -37,9 +37,9 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ────────────────────────────────────────────────
-#               CACHED AI SUMMARY
+#               CACHED AI SUMMARY  ← FIXED: removed hash_funcs
 # ────────────────────────────────────────────────
-@st.cache_data(ttl=3600, hash_funcs={str: lambda x: hashlib.md5(x.encode()).hexdigest()})
+@st.cache_data(ttl=3600)
 def get_ai_summary(text: str) -> str:
     API_URL = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn"
     if "HF_TOKEN" not in st.secrets:
@@ -64,7 +64,7 @@ def get_ai_summary(text: str) -> str:
                 time.sleep(4)
                 continue
             return result[0]['summary_text']
-        except:
+        except Exception:
             continue
     return "SUMMARY_TIMEOUT"
 
@@ -160,9 +160,7 @@ def cached_scrape_story(url: str):
             if src.startswith("//"): src = "https:" + src
             full_src = urljoin(url, src) if not src.startswith(('http://', 'https://')) else src
             bad = ["logo", "icon", "avatar", "pixel", "blank", "gif"]
-            if (full_src not in original_images and 
-                len(original_images) < 3 and 
-                not any(b in full_src.lower() for b in bad)):
+            if full_src not in original_images and len(original_images) < 3 and not any(b in full_src.lower() for b in bad):
                 original_images.append(full_src)
         
         return raw_text, original_images[:3]
@@ -269,10 +267,8 @@ for item in filtered_stream:
                     with st.spinner(">> FAST DEEP SCAN (cached where possible)..."):
                         raw_text, original_images = cached_scrape_story(item['link'])
                         
-                        # Web images ALWAYS fetched
                         web_images = get_web_story_images(item['title'])
                         
-                        # ── ORIGINAL IMAGES ──
                         if original_images:
                             st.write("**📸 IMAGES FROM ORIGINAL SOURCE**")
                             cols = st.columns(min(3, len(original_images)))
@@ -286,7 +282,6 @@ for item in filtered_stream:
                         else:
                             st.info("No images found in original article")
                         
-                        # ── WEB IMAGES (always shown) ──
                         if web_images:
                             st.write("**🌐 ADDITIONAL IMAGES FROM WEB SOURCES**")
                             cols = st.columns(min(3, len(web_images)))
@@ -300,7 +295,6 @@ for item in filtered_stream:
                         else:
                             st.info("No additional web images found")
                         
-                        # ── CACHED AI SUMMARY ──
                         if len(raw_text) > 180:
                             report = get_ai_summary(raw_text)
                             st.markdown(
@@ -340,4 +334,4 @@ for item in filtered_stream:
             st.markdown(f"[>> FULL ARTICLE]({item['link']})")
 
 st.markdown("---")
-st.caption("v7.1 • Heavy caching • Web images always shown • Reduced API load")
+st.caption("v7.1 • Heavy caching • Web images always shown • Reduced API load • Fixed recursion error")
