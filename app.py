@@ -3,18 +3,16 @@ import requests
 from bs4 import BeautifulSoup
 import os
 import re
+import random
 from collections import Counter
 import nltk
 
-# Download NLTK resources
 nltk.download('punkt')
 nltk.download('stopwords')
 
 # ---------------- CONFIG ---------------- #
 HF_API_TOKEN = st.secrets.get("HF_API_TOKEN", "")
 HF_MODEL = "sshleifer/distilbart-cnn-12-6"
-
-BASE_URL = "https://www.theguardian.com/football"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -23,6 +21,34 @@ HEADERS = {
 
 IMAGE_DIR = "downloaded_images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
+
+# ---------------- 20 SOURCES ---------------- #
+SOURCES = [
+    ("Guardian", "https://www.theguardian.com/football"),
+    ("BBC", "https://www.bbc.com/sport/football"),
+    ("ESPN", "https://www.espn.com/soccer/"),
+    ("Goal", "https://www.goal.com/en"),
+    ("Sky Sports", "https://www.skysports.com/football"),
+    ("Football365", "https://www.football365.com"),
+    ("The Athletic", "https://theathletic.com/football/"),
+    ("CBS Sports", "https://www.cbssports.com/soccer/"),
+    ("NBC Sports", "https://www.nbcsports.com/soccer"),
+    ("Yahoo Sports", "https://sports.yahoo.com/soccer/"),
+    ("Fox Sports", "https://www.foxsports.com/soccer"),
+    ("Bleacher Report", "https://bleacherreport.com/world-football"),
+    ("90min", "https://www.90min.com"),
+    ("GiveMeSport", "https://www.givemesport.com/football"),
+    ("TalkSport", "https://talksport.com/football"),
+    ("Mirror Football", "https://www.mirror.co.uk/sport/football/"),
+    ("Independent", "https://www.independent.co.uk/sport/football"),
+    ("Evening Standard", "https://www.standard.co.uk/sport/football"),
+    ("Reuters Sports", "https://www.reuters.com/lifestyle/sports/"),
+    ("AP News", "https://apnews.com/hub/soccer")
+]
+
+# Session state for rotating sources
+if "source_index" not in st.session_state:
+    st.session_state.source_index = 1
 
 # ---------------- HUGGING FACE ---------------- #
 def summarize_hf(text):
@@ -35,91 +61,50 @@ def summarize_hf(text):
             "parameters": {"max_length": 80, "min_length": 30}
         }
 
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=20)
-
-        if response.status_code != 200:
-            return "⚠️ HF API Error"
-
-        result = response.json()
-
-        if isinstance(result, list):
-            return result[0].get("summary_text", "No summary available")
-        else:
-            return "Summary unavailable"
-
-    except Exception as e:
-        return f"Error: {e}"
-
-# ---------------- SCRAPER ---------------- #
-def get_articles():
-    try:
-        res = requests.get(BASE_URL, headers=HEADERS, timeout=10)
+        res = requests.post(API_URL, headers=headers, json=payload, timeout=20)
 
         if res.status_code != 200:
-            st.error("Failed to fetch homepage")
-            return []
+            return "⚠️ HF API Error"
 
+        result = res.json()
+        return result[0]["summary_text"] if isinstance(result, list) else "No summary"
+
+    except:
+        return "Summary failed"
+
+# ---------------- GENERIC SCRAPER ---------------- #
+def extract_links(url):
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(res.text, "html.parser")
 
-        articles = []
-        links = soup.select("a[data-link-name='article']")
+        links = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            text = a.get_text(strip=True)
 
-        seen = set()
-        for link in links:
-            url = link.get("href")
-            title = link.get_text(strip=True)
+            if len(text) > 30 and "http" in href:
+                links.append((text, href))
 
-            if url and url not in seen and title:
-                seen.add(url)
-                articles.append((title, url))
+        return links[:5]
 
-            if len(articles) == 5:
-                break
-
-        return articles
-
-    except Exception as e:
-        st.error(f"Error fetching articles: {e}")
+    except:
         return []
 
-# ---------------- FIXED ARTICLE SCRAPER ---------------- #
 def scrape_article(url):
     try:
         res = requests.get(url, headers=HEADERS, timeout=10)
-
-        if res.status_code != 200:
-            return "", None
-
         soup = BeautifulSoup(res.text, "html.parser")
 
-        text = ""
+        paragraphs = soup.find_all("p")
+        text = " ".join(p.get_text() for p in paragraphs[:30])
 
-        # Multiple fallback selectors (IMPORTANT FIX)
-        selectors = [
-            "div[itemprop='articleBody'] p",
-            "div[data-gu-name='body'] p",
-            "div[data-gu-name='maincontent'] p",
-            "main p"
-        ]
-
-        for selector in selectors:
-            paragraphs = soup.select(selector)
-            if paragraphs:
-                text = " ".join(p.get_text() for p in paragraphs)
-                break
-
-        # Final fallback
-        if not text:
-            paragraphs = soup.find_all("p")
-            text = " ".join(p.get_text() for p in paragraphs[:20])
-
-        # Image extraction
         img_tag = soup.find("meta", property="og:image")
         image_url = img_tag["content"] if img_tag else None
 
-        return text.strip(), image_url
+        return text, image_url
 
-    except Exception as e:
+    except:
         return "", None
 
 # ---------------- HASHTAGS ---------------- #
@@ -134,71 +119,73 @@ def generate_hashtags(text):
         return [f"#{w.capitalize()}" for w, _ in common]
 
     except:
-        return ["#Football", "#Soccer", "#News"]
+        return ["#Football", "#Soccer"]
 
 # ---------------- IMAGE ---------------- #
 def download_image(url, title):
     if not url:
         return None
-
     try:
-        res = requests.get(url, headers=HEADERS, timeout=10)
-
+        res = requests.get(url, headers=HEADERS)
         filename = re.sub(r'[\\/*?:"<>|]', "", title)[:50] + ".jpg"
         path = os.path.join(IMAGE_DIR, filename)
-
         with open(path, "wb") as f:
             f.write(res.content)
-
         return path
-
     except:
         return None
 
 # ---------------- UI ---------------- #
-st.set_page_config(page_title="⚽ Soccer News AI", layout="wide")
+st.set_page_config(page_title="⚽ Multi-Source Soccer AI", layout="wide")
 
-st.title("⚽ Soccer News AI Generator")
-st.caption("Scrape → Summarize → Social Post")
+st.title("⚽ Multi-Source Soccer News AI")
+st.caption("20 Sources • Auto Rotation • AI Summaries")
 
-if st.button("🚀 Fetch Latest News"):
-    articles = get_articles()
+if st.button("🚀 Fetch News"):
+    max_sources = st.session_state.source_index
 
-    if not articles:
-        st.warning("No articles found")
-    else:
-        for title, url in articles:
-            st.divider()
-            st.subheader(title)
+    st.info(f"Using {max_sources} source(s)")
 
-            text, image_url = scrape_article(url)
+    active_sources = SOURCES[:max_sources]
 
-            # Improved failure detection
+    for name, url in active_sources:
+        st.divider()
+        st.subheader(f"🌍 Source: {name}")
+
+        articles = extract_links(url)
+
+        if not articles:
+            st.warning("No articles found")
+            continue
+
+        for title, link in articles[:2]:
+            st.markdown(f"### {title}")
+
+            text, image_url = scrape_article(link)
+
             if not text or len(text) < 200:
-                st.warning("⚠️ Article content too short or blocked")
-                st.write(url)
+                st.warning("⚠️ Content blocked/skipped")
                 continue
 
-            with st.spinner("🤖 Summarizing with AI..."):
-                summary = summarize_hf(text)
-
+            summary = summarize_hf(text)
             hashtags = generate_hashtags(text)
-            image_path = download_image(image_url, title)
 
-            # Display image
             if image_url:
                 st.image(image_url, use_container_width=True)
-
-            st.write(summary)
 
             post = f"""
 🔥 {title}
 
 📝 {summary}
 
-🔗 {url}
+🔗 {link}
 
 {' '.join(hashtags)}
 """
 
             st.text_area("📋 Copy Post", post, height=150)
+
+    # 🔥 Increase sources each refresh
+    if st.session_state.source_index < len(SOURCES):
+        st.session_state.source_index += 1
+        
