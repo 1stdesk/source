@@ -4,7 +4,7 @@ import feedparser
 import hashlib
 from bs4 import BeautifulSoup
 import time
-import streamlit.components.v1 as components  # Built-in - for YouTube embed
+import streamlit.components.v1 as components
 
 # --- FUTURISTIC UI CONFIG ---
 st.set_page_config(page_title="NEO-SCOUT v7.0", page_icon="📡", layout="wide")
@@ -70,48 +70,35 @@ def is_soccer_story(title: str) -> bool:
 
 # --- VIDEO DETECTION HELPER ---
 def extract_video_info(url):
-    """Returns (video_url, video_type) where video_type is 'youtube' or 'direct' or None"""
     try:
         r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(r.content, 'html.parser')
-
-        # 1. Open Graph video meta (common on news sites)
         og_video = soup.find("meta", property="og:video") or soup.find("meta", property="og:video:secure_url")
         if og_video and og_video.get("content"):
             vurl = og_video["content"]
             if "youtube.com" in vurl.lower() or "youtu.be" in vurl.lower():
                 return vurl, "youtube"
             return vurl, "direct"
-
-        # 2. YouTube iframe embed (most common for soccer highlights)
         iframe = soup.find("iframe", src=lambda x: x and ("youtube.com/embed" in x or "youtu.be" in x))
         if iframe and iframe.get("src"):
             return iframe["src"], "youtube"
-
-        # 3. Native <video> tag (direct MP4)
         video_tag = soup.find("video")
         if video_tag:
             source = video_tag.find("source")
             if source and source.get("src"):
                 return source["src"], "direct"
-
         return None, None
     except:
         return None, None
 
 def extract_youtube_id(video_url):
-    """Convert any YouTube URL/embed to clean video ID"""
-    if not video_url:
-        return None
-    if "embed/" in video_url:
-        return video_url.split("embed/")[-1].split("?")[0].split("&")[0]
-    if "watch?v=" in video_url:
-        return video_url.split("watch?v=")[-1].split("&")[0]
-    if "youtu.be/" in video_url:
-        return video_url.split("youtu.be/")[-1].split("?")[0]
+    if not video_url: return None
+    if "embed/" in video_url: return video_url.split("embed/")[-1].split("?")[0].split("&")[0]
+    if "watch?v=" in video_url: return video_url.split("watch?v=")[-1].split("&")[0]
+    if "youtu.be/" in video_url: return video_url.split("youtu.be/")[-1].split("?")[0]
     return None
 
-# --- 20 SOURCES → SOCCER-ONLY + MIXED BY LATEST POST TIME ---
+# --- 20 SOURCES → SOCCER-ONLY + MIXED BY LATEST + DEDUPLICATED ---
 @st.cache_data(ttl=300)
 def get_live_stream():
     feeds = [
@@ -140,30 +127,35 @@ def get_live_stream():
         ("BBC_FOOTBALL", "https://feeds.bbci.co.uk/sport/football/rss.xml")
     ]
     
-    all_entries = []
+    seen = {}  # link → (pub_time, item)  → automatic deduplication
     for src_name, url in feeds:
         try:
             f = feedparser.parse(url)
             for entry in f.entries:
                 if not is_soccer_story(entry.title):
                     continue
+                link = entry.link
                 pub_time = entry.get('published_parsed') or entry.get('updated_parsed') or time.gmtime(0)
                 item = {
-                    "id": hashlib.md5(entry.link.encode()).hexdigest(),
+                    "id": hashlib.md5(link.encode()).hexdigest(),
                     "title": entry.title.upper(),
-                    "link": entry.link,
+                    "link": link,
                     "src": src_name
                 }
-                all_entries.append((pub_time, item))
+                # Keep the version with the newest publish time if duplicate appears
+                if link not in seen or pub_time > seen[link][0]:
+                    seen[link] = (pub_time, item)
         except:
             continue
     
+    # Sort by latest time across ALL 20 sources
+    all_entries = list(seen.values())
     all_entries.sort(key=lambda x: x[0], reverse=True)
+    
     stream = [item for _, item in all_entries[:60]]
     return stream
 
 def scrape_intel(url):
-    """Original text + image scraper (unchanged)"""
     try:
         r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(r.content, 'html.parser')
@@ -175,7 +167,7 @@ def scrape_intel(url):
 
 # --- MAIN INTERFACE ---
 st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_V7")
-st.markdown("**SOCCER-ONLY • 20 SOURCES MIXED BY LATEST • AI SUMMARIES + VIDEO PLAY/DOWNLOAD**")
+st.markdown("**SOCCER-ONLY • 20 SOURCES MIXED BY LATEST • AI + VIDEO PLAY/DOWNLOAD**")
 st.markdown("---")
 
 col_header, col_ref = st.columns([5, 1])
@@ -218,7 +210,6 @@ for item in filtered_stream:
                 if st.button("🎥 SCAN_VIDEO", key=f"vid_{item['id']}"):
                     with st.spinner(">> SCANNING_FOR_VIDEO..."):
                         video_url, video_type = extract_video_info(item['link'])
-                        
                         if video_url:
                             if video_type == "youtube":
                                 vid_id = extract_youtube_id(video_url)
@@ -231,9 +222,7 @@ for item in filtered_stream:
                                         height=420
                                     )
                                     st.markdown(f"[📥 Open on YouTube & Download]({video_url})")
-                                else:
-                                    st.warning("YouTube link found but ID could not be extracted")
-                            else:  # direct MP4 or similar
+                            else:
                                 st.success("✅ DIRECT VIDEO FOUND")
                                 st.video(video_url)
                                 st.markdown(f"[📥 RIGHT-CLICK → SAVE VIDEO]({video_url})")
