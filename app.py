@@ -54,7 +54,20 @@ def query_ai_deep(text):
         except: continue
     return "SYSTEM_TIMEOUT: MODEL_FAILURE"
 
-# --- 20 SOURCES (5 SA + 15 GLOBAL) ---
+# --- SOCCER-ONLY FILTER ---
+def is_soccer_story(title: str) -> bool:
+    if not title:
+        return False
+    keywords = [
+        "football", "soccer", "premier league", "epl", "champions league", "uefa",
+        "bundesliga", "la liga", "serie a", "ligue 1", "world cup", "euro",
+        "afcon", "fifa", "psl", "kaizer chiefs", "orlando pirates", "mamelodi sundowns",
+        "man united", "man city", "liverpool", "arsenal", "chelsea", "tottenham"
+    ]
+    title_lower = title.lower()
+    return any(kw in title_lower for kw in keywords)
+
+# --- 20 SOURCES → SOCCER-ONLY + MIXED BY LATEST POST TIME ---
 @st.cache_data(ttl=300)
 def get_live_stream():
     feeds = [
@@ -83,19 +96,29 @@ def get_live_stream():
         ("BBC_FOOTBALL", "https://feeds.bbci.co.uk/sport/football/rss.xml")
     ]
     
-    stream = []
+    all_entries = []
     for src_name, url in feeds:
         try:
             f = feedparser.parse(url)
-            for entry in f.entries[:6]:
-                stream.append({
+            for entry in f.entries:
+                if not is_soccer_story(entry.title):
+                    continue
+                pub_time = entry.get('published_parsed') or entry.get('updated_parsed') or time.gmtime(0)
+                item = {
                     "id": hashlib.md5(entry.link.encode()).hexdigest(),
                     "title": entry.title.upper(),
                     "link": entry.link,
                     "src": src_name
-                })
-        except: 
+                }
+                all_entries.append((pub_time, item))
+        except:
             continue
+    
+    # MIX ALL SOURCES + SORT BY LATEST POST TIME (most recent first)
+    all_entries.sort(key=lambda x: x[0], reverse=True)
+    
+    # Return top 60 latest soccer stories
+    stream = [item for _, item in all_entries[:60]]
     return stream
 
 def scrape_intel(url):
@@ -107,6 +130,51 @@ def scrape_intel(url):
         return " ".join(paras[:5]), (img["content"] if img else None)
     except: 
         return "", None
+
+# --- MAIN INTERFACE ---
+st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_V7")
+st.markdown("**SOCCER-ONLY MODE • 20 SOURCES MIXED BY LATEST POST TIME • AI DEEP SUMMARIES**")
+st.markdown("---")
+
+col_header, col_ref = st.columns([5, 1])
+with col_ref:
+    if st.button("🔄 REFRESH_LIST"):
+        st.cache_data.clear()
+        st.rerun()
+
+search_buf = st.text_input(">> INITIALIZE_FILTER_QUERY:", "").upper()
+
+news_stream = get_live_stream()
+filtered_stream = [n for n in news_stream if search_buf in n['title']] if search_buf else news_stream
+
+for item in filtered_stream:
+    with st.container(border=True):
+        st.write(f"SOURCE_NODE: {item['src']}")
+        st.subheader(item['title'])
+        
+        c1, c2 = st.columns([1, 4])
+        with c1:
+            if st.button("RUN_DEEP_INTEL", key=item['id']):
+                with st.spinner(">> DECRYPTING_AND_SUMMARIZING..."):
+                    raw_text, image = scrape_intel(item['link'])
+                    if image: 
+                        st.image(image, use_container_width=True)
+                    if len(raw_text) > 200:
+                        report = query_ai_deep(raw_text)
+                        st.markdown(f"""
+                            <div class="intel-box">
+                                <strong>[AI_SCOUT_DEEP_REPORT]</strong><br><br>
+                                {report}
+                            </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.write(">> ERROR: DATA_PACKET_TOO_SMALL")
+        
+        with c2:
+            st.markdown(f"[>> ACCESS_FULL_LINK]({item['link']})")
+
+st.markdown("---")
+st.write(">> END_OF_STREAM • SOCCER-ONLY • MIXED LATEST STORIES FROM 20 SOURCES")
 
 # --- MAIN INTERFACE ---
 st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_V7")
