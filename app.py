@@ -11,7 +11,7 @@ from duckduckgo_search import DDGS
 # ────────────────────────────────────────────────
 #               FUTURISTIC UI CONFIG
 # ────────────────────────────────────────────────
-st.set_page_config(page_title="NEO-SCOUT v7.1", page_icon="📡", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT v7.2", page_icon="📡", layout="wide")
 
 st.markdown("""
     <style>
@@ -37,7 +37,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ────────────────────────────────────────────────
-#               CACHED AI SUMMARY
+#               CACHED AI SUMMARY + TOPIC UNDERSTANDING
 # ────────────────────────────────────────────────
 @st.cache_data(ttl=3600)
 def get_ai_summary(text: str) -> str:
@@ -48,13 +48,8 @@ def get_ai_summary(text: str) -> str:
     headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
     payload = {
         "inputs": text[:1000],
-        "parameters": {
-            "do_sample": False,
-            "max_length": 140,
-            "min_length": 60,
-            "repetition_penalty": 1.2,
-            "length_penalty": 1.3
-        }
+        "parameters": {"do_sample": False, "max_length": 140, "min_length": 60,
+                       "repetition_penalty": 1.2, "length_penalty": 1.3}
     }
     for _ in range(3):
         try:
@@ -67,6 +62,12 @@ def get_ai_summary(text: str) -> str:
         except Exception:
             continue
     return "SUMMARY_TIMEOUT"
+
+# New helper: AI understands the topic and returns key elements
+@st.cache_data(ttl=1800)
+def ai_extract_topic(title: str) -> str:
+    prompt = f"Extract ONLY the most important soccer elements in maximum 12 words: players, teams, event, action from this headline: {title}"
+    return get_ai_summary(prompt).strip()  # reuse same model for speed
 
 # ────────────────────────────────────────────────
 #               SOCCER FILTER
@@ -83,7 +84,7 @@ def is_soccer_story(title: str) -> bool:
     return any(kw in title.lower() for kw in keywords)
 
 # ────────────────────────────────────────────────
-#               VIDEO HELPERS
+#               VIDEO HELPERS (unchanged)
 # ────────────────────────────────────────────────
 def extract_video_info(url):
     try:
@@ -115,45 +116,37 @@ def extract_youtube_id(video_url):
     return None
 
 # ────────────────────────────────────────────────
-#               CACHED WEB IMAGE SEARCH – IMPROVED QUERY
+#               AI-POWERED WEB IMAGE SEARCH (NEW LOGIC)
 # ────────────────────────────────────────────────
 @st.cache_data(ttl=1800)
 def get_web_story_images(title: str):
     try:
-        clean_title = title.replace('"', '').strip()
+        # 1. Let AI understand the topic
+        topic_keywords = ai_extract_topic(title)
         
-        # Tighter query — focuses on real match/action photos, excludes common junk
+        # 2. Build ultra-targeted query (story picture + 2 more relevant)
         query = (
-            f'"{clean_title}" '
-            f'(soccer OR football) '
-            f'(match OR action OR player OR goal OR celebration OR stadium) '
+            f'"{title}" {topic_keywords} '
+            f'(soccer OR football) (match OR action OR goal OR celebration OR player OR stadium) '
             f'(photo OR picture OR image OR shot OR gallery) '
             f'-stock -shutterstock -getty -istock -alamy -cartoon -illustration -vector -meme -ai -generated -logo'
         )
 
         with DDGS() as ddgs:
-            results = list(ddgs.images(query, max_results=10, safesearch="off"))
+            results = list(ddgs.images(query, max_results=12, safesearch="off"))
 
         urls = []
         seen = set()
         for r in results:
             img = r.get("image", "")
-            if not img or not img.startswith("http"):
+            if not img or not img.startswith("http") or img in seen:
                 continue
-            if img in seen:
-                continue
-            
             lower = img.lower()
-            # Extra client-side rejection of common irrelevant sources
-            if any(bad in lower for bad in [
-                "stock", "shutterstock", "gettyimages", "istockphoto", "alamy", 
-                "meme", "cartoon", "ai generated", "vector", "illustration"
-            ]):
+            if any(bad in lower for bad in ["stock", "shutterstock", "getty", "istock", "alamy", "meme", "cartoon", "ai"]):
                 continue
-            
             seen.add(img)
             urls.append(img)
-            if len(urls) >= 3:
+            if len(urls) >= 3:          # exactly 3 as requested
                 break
 
         return urls[:3]
@@ -260,8 +253,8 @@ def get_live_stream():
 # ────────────────────────────────────────────────
 #               MAIN INTERFACE
 # ────────────────────────────────────────────────
-st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_v7.1 – SPEED EDITION")
-st.markdown("**SOCCER-ONLY • CACHED AI + IMPROVED WEB IMAGES + SCRAPING**")
+st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_v7.2 – AI IMAGE MODE")
+st.markdown("**SOCCER-ONLY • AI UNDERSTANDS TOPIC → 1 STORY PICTURE + 2 MORE WEB IMAGES**")
 st.markdown("---")
 
 col_header, col_ref = st.columns([5, 1])
@@ -289,11 +282,13 @@ for item in filtered_stream:
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
                 if st.button("RUN_DEEP_INTEL", key=f"ai_{item['id']}"):
-                    with st.spinner(">> FAST DEEP SCAN (cached where possible)..."):
+                    with st.spinner(">> AI ANALYZING TOPIC + FETCHING STORY PICTURE + 2 MORE..."):
                         raw_text, original_images = cached_scrape_story(item['link'])
                         
+                        # AI-powered web images (1 story picture + 2 more)
                         web_images = get_web_story_images(item['title'])
                         
+                        # ORIGINAL SOURCE IMAGES
                         if original_images:
                             st.write("**📸 IMAGES FROM ORIGINAL SOURCE**")
                             cols = st.columns(min(3, len(original_images)))
@@ -302,24 +297,26 @@ for item in filtered_stream:
                                     try:
                                         st.image(img_url, use_container_width=True)
                                     except:
-                                        st.caption("Image failed to load")
+                                        st.caption("Image failed")
                                     st.markdown(f"[📥]({img_url})")
                         else:
-                            st.info("No images found in original article")
+                            st.info("No images in original article")
                         
+                        # AI-UNDERSTOOD WEB IMAGES (exactly as requested)
                         if web_images:
-                            st.write("**🌐 ADDITIONAL IMAGES FROM WEB SOURCES** (improved relevance)")
+                            st.write("**🌐 AI-UNDERSTOOD WEB IMAGES** (story picture + 2 more)")
                             cols = st.columns(min(3, len(web_images)))
                             for idx, img_url in enumerate(web_images):
                                 with cols[idx]:
                                     try:
                                         st.image(img_url, use_container_width=True)
                                     except:
-                                        st.caption("Image failed to load")
+                                        st.caption("Image failed")
                                     st.markdown(f"[📥]({img_url})")
                         else:
-                            st.info("No relevant web images found")
+                            st.info("No relevant AI-guided images found")
                         
+                        # AI SUMMARY
                         if len(raw_text) > 180:
                             report = get_ai_summary(raw_text)
                             st.markdown(
@@ -359,4 +356,4 @@ for item in filtered_stream:
             st.markdown(f"[>> FULL ARTICLE]({item['link']})")
 
 st.markdown("---")
-st.caption("v7.1 • Heavy caching • Stricter web image search • Reduced off-topic results")
+st.caption("v7.2 • AI now understands headline → picks 1 story picture + 2 more relevant web images")
