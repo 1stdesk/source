@@ -1,7 +1,5 @@
 streamlit
 feedparser
-requests
-beautifulsoup4
 newspaper3k
 torch --extra-index-url https://download.pytorch.org/whl/cpu
 transformers
