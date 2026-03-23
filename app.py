@@ -8,10 +8,11 @@ import streamlit.components.v1 as components
 from urllib.parse import urljoin
 from duckduckgo_search import DDGS
 
-# --- FUTURISTIC UI CONFIG ---
+# ────────────────────────────────────────────────
+#               FUTURISTIC UI CONFIG
+# ────────────────────────────────────────────────
 st.set_page_config(page_title="NEO-SCOUT v7.1", page_icon="📡", layout="wide")
 
-# Custom CSS (unchanged)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
@@ -35,7 +36,9 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- CACHED AI SUMMARY ---
+# ────────────────────────────────────────────────
+#               CACHED AI SUMMARY
+# ────────────────────────────────────────────────
 @st.cache_data(ttl=3600, hash_funcs={str: lambda x: hashlib.md5(x.encode()).hexdigest()})
 def get_ai_summary(text: str) -> str:
     API_URL = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn"
@@ -65,7 +68,9 @@ def get_ai_summary(text: str) -> str:
             continue
     return "SUMMARY_TIMEOUT"
 
-# --- SOCCER FILTER ---
+# ────────────────────────────────────────────────
+#               SOCCER FILTER
+# ────────────────────────────────────────────────
 def is_soccer_story(title: str) -> bool:
     if not title:
         return False
@@ -77,7 +82,9 @@ def is_soccer_story(title: str) -> bool:
     ]
     return any(kw in title.lower() for kw in keywords)
 
-# --- VIDEO HELPERS ---
+# ────────────────────────────────────────────────
+#               VIDEO HELPERS
+# ────────────────────────────────────────────────
 def extract_video_info(url):
     try:
         r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
@@ -107,7 +114,9 @@ def extract_youtube_id(video_url):
     if "youtu.be/" in video_url: return video_url.split("youtu.be/")[-1].split("?")[0]
     return None
 
-# --- CACHED WEB IMAGE SEARCH ---
+# ────────────────────────────────────────────────
+#               CACHED WEB IMAGE SEARCH
+# ────────────────────────────────────────────────
 @st.cache_data(ttl=1800)
 def get_web_story_images(title: str):
     try:
@@ -126,7 +135,9 @@ def get_web_story_images(title: str):
     except:
         return []
 
-# --- CACHED STORY SCRAPING ---
+# ────────────────────────────────────────────────
+#               CACHED STORY SCRAPING
+# ────────────────────────────────────────────────
 @st.cache_data(ttl=1800)
 def cached_scrape_story(url: str):
     try:
@@ -158,7 +169,9 @@ def cached_scrape_story(url: str):
     except:
         return "", []
 
-# --- CACHED RSS FEED ---
+# ────────────────────────────────────────────────
+#               CACHED RSS FEED
+# ────────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def get_live_stream():
     feeds = [
@@ -221,7 +234,9 @@ def get_live_stream():
     all_entries = [item for _, item in sorted(seen.values(), key=lambda x: x[0], reverse=True)][:60]
     return all_entries
 
-# --- MAIN INTERFACE ---
+# ────────────────────────────────────────────────
+#               MAIN INTERFACE
+# ────────────────────────────────────────────────
 st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_v7.1 – SPEED EDITION")
 st.markdown("**SOCCER-ONLY • CACHED AI + ALWAYS SHOW WEB IMAGES + SCRAPING**")
 st.markdown("---")
@@ -254,10 +269,10 @@ for item in filtered_stream:
                     with st.spinner(">> FAST DEEP SCAN (cached where possible)..."):
                         raw_text, original_images = cached_scrape_story(item['link'])
                         
-                        # Web images ALWAYS fetched (as requested)
+                        # Web images ALWAYS fetched
                         web_images = get_web_story_images(item['title'])
                         
-                        # ORIGINAL IMAGES
+                        # ── ORIGINAL IMAGES ──
                         if original_images:
                             st.write("**📸 IMAGES FROM ORIGINAL SOURCE**")
                             cols = st.columns(min(3, len(original_images)))
@@ -271,7 +286,7 @@ for item in filtered_stream:
                         else:
                             st.info("No images found in original article")
                         
-                        # WEB IMAGES – always shown (even if original has good images)
+                        # ── WEB IMAGES (always shown) ──
                         if web_images:
                             st.write("**🌐 ADDITIONAL IMAGES FROM WEB SOURCES**")
                             cols = st.columns(min(3, len(web_images)))
@@ -285,11 +300,44 @@ for item in filtered_stream:
                         else:
                             st.info("No additional web images found")
                         
-                        # CACHED AI SUMMARY
+                        # ── CACHED AI SUMMARY ──
                         if len(raw_text) > 180:
                             report = get_ai_summary(raw_text)
-                            st.markdown(f"""
+                            st.markdown(
+                                f"""
                                 <div class="intel-box">
                                     <strong>[AI SUMMARY – CACHED]</strong><br><br>
                                     {report}
-                                </div
+                                </div>
+                                """.strip(),
+                                unsafe_allow_html=True
+                            )
+                        else:
+                            st.write(">> TEXT TOO SHORT FOR SUMMARY")
+            
+            with col_btn2:
+                if st.button("🎥 SCAN_VIDEO", key=f"vid_{item['id']}"):
+                    with st.spinner("Scanning for video..."):
+                        video_url, video_type = extract_video_info(item['link'])
+                        if video_url:
+                            if video_type == "youtube":
+                                vid_id = extract_youtube_id(video_url)
+                                if vid_id:
+                                    st.success("YouTube video found")
+                                    components.html(
+                                        f'<iframe width="100%" height="360" '
+                                        f'src="https://www.youtube.com/embed/{vid_id}" '
+                                        f'frameborder="0" allowfullscreen></iframe>',
+                                        height=380
+                                    )
+                            else:
+                                st.success("Direct video found")
+                                st.video(video_url)
+                        else:
+                            st.info("No video detected")
+        
+        with c2:
+            st.markdown(f"[>> FULL ARTICLE]({item['link']})")
+
+st.markdown("---")
+st.caption("v7.1 • Heavy caching • Web images always shown • Reduced API load")
