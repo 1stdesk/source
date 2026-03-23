@@ -24,25 +24,15 @@ except:
 # ────────────────────────────────────────────────
 # CONFIG
 # ────────────────────────────────────────────────
-st.set_page_config(page_title="NEO-SCOUT v15", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT v16", layout="wide")
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # ────────────────────────────────────────────────
-# SOURCES (SHORTENED FOR DEMO — USE YOUR FULL LIST)
+# YOUR FULL SOURCE LIST HERE
 # ────────────────────────────────────────────────
 ALL_SOURCES = [
-    ("GOAL", "https://www.goal.com/en/feeds/news"),
-    ("BBC", "https://feeds.bbci.co.uk/sport/football/rss.xml"),
-    ("GUARDIAN", "https://www.theguardian.com/football/rss"),
-    ("ESPN", "https://www.espn.com/espn/rss/soccer/news"),
-    ("SKY", "https://www.skysports.com/rss/12040"),
-    ("90MIN", "https://www.90min.com/posts.rss"),
-    ("CBS", "https://www.cbssports.com/rss/headlines/soccer/"),
-    ("NBC", "https://www.nbcsports.com/soccer/rss.xml"),
-    ("YAHOO", "https://sports.yahoo.com/soccer/rss/"),
-    ("FOX", "https://api.foxsports.com/v1/rss?category=soccer"),
-    # 👉 ADD YOUR FULL LIST HERE
+    # 🔥 PASTE YOUR FULL LIST HERE
 ]
 
 # ────────────────────────────────────────────────
@@ -51,8 +41,8 @@ ALL_SOURCES = [
 if "source_limit" not in st.session_state:
     st.session_state.source_limit = 10
 
-if "page" not in st.session_state:
-    st.session_state.page = 1
+if "article_limit" not in st.session_state:
+    st.session_state.article_limit = 5
 
 # ────────────────────────────────────────────────
 # IMAGE SYSTEM
@@ -165,7 +155,8 @@ def get_feed(limit):
 # ────────────────────────────────────────────────
 # UI
 # ────────────────────────────────────────────────
-st.title("⚡ NEO-SCOUT v15")
+st.title("⚡ NEO-SCOUT v16")
+st.caption("INFINITE SOCCER NEWS FEED • LAST 2 HOURS")
 
 feed = get_feed(st.session_state.source_limit)
 
@@ -174,12 +165,9 @@ search = st.text_input("📡 FILTER NEWS").upper()
 if search:
     feed = [f for f in feed if search in f["title"]]
 
-# PAGINATION
-ARTICLES_PER_PAGE = 5
-end = st.session_state.page * ARTICLES_PER_PAGE
-visible_feed = feed[:end]
+visible_feed = feed[:st.session_state.article_limit]
 
-# DISPLAY ARTICLES
+# DISPLAY
 for entry in visible_feed:
     st.markdown("---")
 
@@ -198,19 +186,15 @@ for entry in visible_feed:
         st.code(post)
 
 # ────────────────────────────────────────────────
-# 🔘 BUTTONS (FIXED BELOW CONTENT)
+# ♾ INFINITE LOAD TRIGGER
 # ────────────────────────────────────────────────
 st.markdown("---")
 
-col1, col2 = st.columns(2)
+if st.button("⬇️ Load More"):
+    st.session_state.article_limit += 5
 
-with col1:
-    if st.button("📄 Load More Articles"):
-        st.session_state.page += 1
-        st.rerun()
+    # Auto-expand sources when needed
+    if st.session_state.article_limit > len(feed) and st.session_state.source_limit < len(ALL_SOURCES):
+        st.session_state.source_limit += 10
 
-with col2:
-    if st.button("🌍 Load More Sources (+10)"):
-        if st.session_state.source_limit < len(ALL_SOURCES):
-            st.session_state.source_limit += 10
-            st.rerun()
+    st.rerun()
