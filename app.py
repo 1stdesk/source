@@ -4,6 +4,7 @@ import feedparser
 import hashlib
 from bs4 import BeautifulSoup
 import time
+import streamlit.components.v1 as components  # Built-in - for YouTube embed
 
 # --- FUTURISTIC UI CONFIG ---
 st.set_page_config(page_title="NEO-SCOUT v7.0", page_icon="📡", layout="wide")
@@ -67,6 +68,49 @@ def is_soccer_story(title: str) -> bool:
     title_lower = title.lower()
     return any(kw in title_lower for kw in keywords)
 
+# --- VIDEO DETECTION HELPER ---
+def extract_video_info(url):
+    """Returns (video_url, video_type) where video_type is 'youtube' or 'direct' or None"""
+    try:
+        r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
+        soup = BeautifulSoup(r.content, 'html.parser')
+
+        # 1. Open Graph video meta (common on news sites)
+        og_video = soup.find("meta", property="og:video") or soup.find("meta", property="og:video:secure_url")
+        if og_video and og_video.get("content"):
+            vurl = og_video["content"]
+            if "youtube.com" in vurl.lower() or "youtu.be" in vurl.lower():
+                return vurl, "youtube"
+            return vurl, "direct"
+
+        # 2. YouTube iframe embed (most common for soccer highlights)
+        iframe = soup.find("iframe", src=lambda x: x and ("youtube.com/embed" in x or "youtu.be" in x))
+        if iframe and iframe.get("src"):
+            return iframe["src"], "youtube"
+
+        # 3. Native <video> tag (direct MP4)
+        video_tag = soup.find("video")
+        if video_tag:
+            source = video_tag.find("source")
+            if source and source.get("src"):
+                return source["src"], "direct"
+
+        return None, None
+    except:
+        return None, None
+
+def extract_youtube_id(video_url):
+    """Convert any YouTube URL/embed to clean video ID"""
+    if not video_url:
+        return None
+    if "embed/" in video_url:
+        return video_url.split("embed/")[-1].split("?")[0].split("&")[0]
+    if "watch?v=" in video_url:
+        return video_url.split("watch?v=")[-1].split("&")[0]
+    if "youtu.be/" in video_url:
+        return video_url.split("youtu.be/")[-1].split("?")[0]
+    return None
+
 # --- 20 SOURCES → SOCCER-ONLY + MIXED BY LATEST POST TIME ---
 @st.cache_data(ttl=300)
 def get_live_stream():
@@ -114,14 +158,12 @@ def get_live_stream():
         except:
             continue
     
-    # MIX ALL SOURCES + SORT BY LATEST POST TIME (most recent first)
     all_entries.sort(key=lambda x: x[0], reverse=True)
-    
-    # Return top 60 latest soccer stories
     stream = [item for _, item in all_entries[:60]]
     return stream
 
 def scrape_intel(url):
+    """Original text + image scraper (unchanged)"""
     try:
         r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(r.content, 'html.parser')
@@ -133,7 +175,7 @@ def scrape_intel(url):
 
 # --- MAIN INTERFACE ---
 st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_V7")
-st.markdown("**SOCCER-ONLY MODE • 20 SOURCES MIXED BY LATEST POST TIME • AI DEEP SUMMARIES**")
+st.markdown("**SOCCER-ONLY • 20 SOURCES MIXED BY LATEST • AI SUMMARIES + VIDEO PLAY/DOWNLOAD**")
 st.markdown("---")
 
 col_header, col_ref = st.columns([5, 1])
@@ -154,69 +196,52 @@ for item in filtered_stream:
         
         c1, c2 = st.columns([1, 4])
         with c1:
-            if st.button("RUN_DEEP_INTEL", key=item['id']):
-                with st.spinner(">> DECRYPTING_AND_SUMMARIZING..."):
-                    raw_text, image = scrape_intel(item['link'])
-                    if image: 
-                        st.image(image, use_container_width=True)
-                    if len(raw_text) > 200:
-                        report = query_ai_deep(raw_text)
-                        st.markdown(f"""
-                            <div class="intel-box">
-                                <strong>[AI_SCOUT_DEEP_REPORT]</strong><br><br>
-                                {report}
-                            </div>
-                        """, unsafe_allow_html=True)
-                    else:
-                        st.write(">> ERROR: DATA_PACKET_TOO_SMALL")
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("RUN_DEEP_INTEL", key=f"ai_{item['id']}"):
+                    with st.spinner(">> DECRYPTING_AND_SUMMARIZING..."):
+                        raw_text, image = scrape_intel(item['link'])
+                        if image: 
+                            st.image(image, use_container_width=True)
+                        if len(raw_text) > 200:
+                            report = query_ai_deep(raw_text)
+                            st.markdown(f"""
+                                <div class="intel-box">
+                                    <strong>[AI_SCOUT_DEEP_REPORT]</strong><br><br>
+                                    {report}
+                                </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.write(">> ERROR: DATA_PACKET_TOO_SMALL")
+            
+            with col_btn2:
+                if st.button("🎥 SCAN_VIDEO", key=f"vid_{item['id']}"):
+                    with st.spinner(">> SCANNING_FOR_VIDEO..."):
+                        video_url, video_type = extract_video_info(item['link'])
+                        
+                        if video_url:
+                            if video_type == "youtube":
+                                vid_id = extract_youtube_id(video_url)
+                                if vid_id:
+                                    st.success("✅ YOUTUBE HIGHLIGHT FOUND")
+                                    components.html(
+                                        f'<iframe width="100%" height="400" '
+                                        f'src="https://www.youtube.com/embed/{vid_id}" '
+                                        f'frameborder="0" allowfullscreen></iframe>',
+                                        height=420
+                                    )
+                                    st.markdown(f"[📥 Open on YouTube & Download]({video_url})")
+                                else:
+                                    st.warning("YouTube link found but ID could not be extracted")
+                            else:  # direct MP4 or similar
+                                st.success("✅ DIRECT VIDEO FOUND")
+                                st.video(video_url)
+                                st.markdown(f"[📥 RIGHT-CLICK → SAVE VIDEO]({video_url})")
+                        else:
+                            st.info("No embedded video detected on this story")
         
         with c2:
             st.markdown(f"[>> ACCESS_FULL_LINK]({item['link']})")
 
 st.markdown("---")
-st.write(">> END_OF_STREAM • SOCCER-ONLY • MIXED LATEST STORIES FROM 20 SOURCES")
-
-# --- MAIN INTERFACE ---
-st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_V7")
-st.markdown("**20 SOURCES (5 SOUTH AFRICA + 15 GLOBAL) • AI DEEP SUMMARIES • STREAMLIT CLOUD READY**")
-st.markdown("---")
-
-col_header, col_ref = st.columns([5, 1])
-with col_ref:
-    if st.button("🔄 REFRESH_LIST"):
-        st.cache_data.clear()
-        st.rerun()
-
-search_buf = st.text_input(">> INITIALIZE_FILTER_QUERY:", "").upper()
-
-news_stream = get_live_stream()
-filtered_stream = [n for n in news_stream if search_buf in n['title']] if search_buf else news_stream
-
-for item in filtered_stream:
-    with st.container(border=True):
-        st.write(f"SOURCE_NODE: {item['src']}")
-        st.subheader(item['title'])
-        
-        c1, c2 = st.columns([1, 4])
-        with c1:
-            if st.button("RUN_DEEP_INTEL", key=item['id']):
-                with st.spinner(">> DECRYPTING_AND_SUMMARIZING..."):
-                    raw_text, image = scrape_intel(item['link'])
-                    if image: 
-                        st.image(image, use_container_width=True)
-                    if len(raw_text) > 200:
-                        report = query_ai_deep(raw_text)
-                        st.markdown(f"""
-                            <div class="intel-box">
-                                <strong>[AI_SCOUT_DEEP_REPORT]</strong><br><br>
-                                {report}
-                            </div>
-                        """, unsafe_allow_html=True)
-                    else:
-                        st.write(">> ERROR: DATA_PACKET_TOO_SMALL")
-        
-        with c2:
-            st.markdown(f"[>> ACCESS_FULL_LINK]({item['link']})")
-
-st.markdown("---")
-st.write(">> END_OF_STREAM • HOSTED ON STREAMLIT CLOUD VIA GITHUB")
+st.write(">> END_OF_STREAM • SOCCER-ONLY • MIXED LATEST STORIES FROM 20 SOURCES • VIDEO READY")
