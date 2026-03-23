@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import nltk
 
 # ────────────────────────────────────────────────
-# NLTK FIX
+# 🔥 NLTK FIX (STREAMLIT SAFE)
 # ────────────────────────────────────────────────
 NLTK_DIR = "/tmp/nltk_data"
 os.makedirs(NLTK_DIR, exist_ok=True)
@@ -23,14 +23,16 @@ except:
     pass
 
 # ────────────────────────────────────────────────
-# CONFIG
+# ⚙ CONFIG
 # ────────────────────────────────────────────────
-st.set_page_config(page_title="NEO-SCOUT FINAL", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT v12", layout="wide")
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+}
 
 # ────────────────────────────────────────────────
-# SOURCES
+# 🌍 SOURCES (20)
 # ────────────────────────────────────────────────
 ALL_SOURCES = [
     ("GOAL", "https://www.goal.com/en/feeds/news"),
@@ -56,37 +58,48 @@ ALL_SOURCES = [
 ]
 
 if "source_limit" not in st.session_state:
-    st.session_state.source_limit = 5
+    st.session_state.source_limit = 6
 
 # ────────────────────────────────────────────────
-# IMAGE FETCH (FIXED)
+# 🖼 IMAGE SYSTEM (FIXED)
 # ────────────────────────────────────────────────
-def fetch_image(query):
+def fetch_article_image(url):
     try:
-        url = f"https://source.unsplash.com/featured/?soccer,{query}"
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            return response.url  # important (redirect final URL)
+        r = requests.get(url, headers=HEADERS, timeout=8)
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        img = soup.find("meta", property="og:image")
+        if img and img.get("content"):
+            return img["content"]
     except:
         pass
+    return None
 
-    # fallback image
-    return "https://images.unsplash.com/photo-1508098682722-e99c43a406b2"
+
+def fetch_image(title, url):
+    # 1. Try real article image
+    img = fetch_article_image(url)
+    if img:
+        return img
+
+    # 2. Stable fallback (no redirect issues)
+    return "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=1200&q=80"
 
 # ────────────────────────────────────────────────
-# SCRAPER
+# 📰 SCRAPER
 # ────────────────────────────────────────────────
 def scrape(url):
     try:
         r = requests.get(url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(r.text, "html.parser")
-        text = " ".join(p.get_text() for p in soup.find_all("p")[:30])
+        paragraphs = soup.find_all("p")
+        text = " ".join(p.get_text() for p in paragraphs[:30])
         return text
     except:
         return None
 
 # ────────────────────────────────────────────────
-# HASHTAGS
+# 🏷 HASHTAGS
 # ────────────────────────────────────────────────
 def generate_tags(text):
     try:
@@ -98,7 +111,7 @@ def generate_tags(text):
         return ["#Football", "#Soccer", "#News"]
 
 # ────────────────────────────────────────────────
-# SUMMARY (FIXED FORMAT)
+# 🧠 SUMMARY (UNCHANGED)
 # ────────────────────────────────────────────────
 def summarize(text, title):
     try:
@@ -116,7 +129,7 @@ def summarize(text, title):
 {' '.join(tags)}"""
 
 # ────────────────────────────────────────────────
-# FEED ENGINE
+# ⏱ FEED ENGINE
 # ────────────────────────────────────────────────
 def parse_time(entry):
     try:
@@ -124,9 +137,10 @@ def parse_time(entry):
     except:
         return None
 
+
 def get_feed(limit):
     items = []
-    seen = set()
+    seen_links = set()
 
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=2)
@@ -139,35 +153,37 @@ def get_feed(limit):
                 link = e.link
                 title = e.title.upper()
 
-                if link in seen:
+                if link in seen_links:
                     continue
 
-                t = parse_time(e)
-                if not t or t < cutoff:
+                pub_time = parse_time(e)
+                if not pub_time or pub_time < cutoff:
                     continue
 
                 items.append({
                     "title": title,
                     "link": link,
                     "source": name,
-                    "time": t.strftime("%H:%M")
+                    "time": pub_time.strftime("%H:%M")
                 })
 
-                seen.add(link)
+                seen_links.add(link)
                 break
+
         except:
             continue
 
     return items
 
 # ────────────────────────────────────────────────
-# UI
+# 🎨 UI
 # ────────────────────────────────────────────────
-st.title("⚡ NEO-SCOUT FINAL")
+st.title("⚡ NEO-SCOUT v12")
+st.caption("REAL-TIME SOCCER INTELLIGENCE • LAST 2 HOURS")
 
 feed = get_feed(st.session_state.source_limit)
 
-search = st.text_input("📡 FILTER").upper()
+search = st.text_input("📡 FILTER NEWS").upper()
 if search:
     feed = [f for f in feed if search in f["title"]]
 
@@ -175,16 +191,16 @@ for entry in feed:
     st.markdown("---")
 
     st.subheader(entry["title"])
-    st.caption(f"{entry['source']} • {entry['time']}")
+    st.caption(f"{entry['source']} • {entry['time']} UTC")
 
-    # 🖼 IMAGE FIXED
-    img = fetch_image(entry["title"])
+    # 🖼 IMAGE (FIXED SYSTEM)
+    img = fetch_image(entry["title"], entry["link"])
     st.image(img, use_container_width=True)
 
     # 🔗 LINK
     st.markdown(f"[Read full article]({entry['link']})")
 
-    # 📦 SUMMARY WITH TITLE + HASHTAGS
+    # 🧠 SUMMARY BOX
     text = scrape(entry["link"])
     if text:
         post = summarize(text, entry["title"])
@@ -192,6 +208,6 @@ for entry in feed:
         st.markdown("### 📋 Social Post")
         st.code(post)
 
-# EXPAND SOURCES
+# 🔄 EXPAND SOURCES GRADUALLY
 if st.session_state.source_limit < 20:
     st.session_state.source_limit += 1
