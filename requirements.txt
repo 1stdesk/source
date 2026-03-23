@@ -1,5 +1,5 @@
-streamlit
-feedparser
-newspaper3k
-torch --extra-index-url https://download.pytorch.org/whl/cpu
-transformers
+requests
+beautifulsoup4
+sumy
+lxml
+nltk
