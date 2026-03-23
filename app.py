@@ -2,358 +2,393 @@ import streamlit as st
 import requests
 import feedparser
 import hashlib
-from bs4 import BeautifulSoup
+import random
 import time
-import streamlit.components.v1 as components
+from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+import streamlit.components.v1 as components
 from duckduckgo_search import DDGS
 
-# ────────────────────────────────────────────────
-#               FUTURISTIC UI CONFIG
-# ────────────────────────────────────────────────
-st.set_page_config(page_title="NEO-SCOUT v7.2", page_icon="📡", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT v7.3", page_icon="📡", layout="wide")
 
+# ─── Futuristic Terminal Style ───────────────────────────────────────────────
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
-    .stApp { background-color: #050505; font-family: 'JetBrains Mono', monospace; }
-    h1, h2, h3, p, span, div { color: #00ff41 !important; text-shadow: 0 0 5px #00ff41; }
-    .stElementContainer div[data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: #0a0a0a !important; border: 1px solid #00ff41 !important;
-        box-shadow: 0 0 15px rgba(0, 255, 65, 0.2); padding: 20px; border-radius: 2px; margin-bottom: 20px;
+    .stApp {
+        background-color: #050505;
+        font-family: 'JetBrains Mono', monospace;
+        color: #00ff41;
     }
-    .stButton>button {
-        background-color: transparent !important; color: #00ff41 !important;
-        border: 1px solid #00ff41 !important; font-family: 'JetBrains Mono', monospace;
-        text-transform: uppercase; letter-spacing: 2px; transition: 0.3s; border-radius: 0px;
+    h1, h2, h3, p, span, div, label, .stMarkdown {
+        color: #00ff41 !important;
+        text-shadow: 0 0 5px #00ff41;
     }
-    .stButton>button:hover { background-color: #00ff41 !important; color: #000 !important; box-shadow: 0 0 20px #00ff41; }
+    .stButton > button {
+        background: transparent;
+        color: #00ff41;
+        border: 1px solid #00ff41;
+        font-family: 'JetBrains Mono', monospace;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        transition: all 0.3s;
+    }
+    .stButton > button:hover {
+        background: #00ff41;
+        color: #000;
+        box-shadow: 0 0 20px #00ff41;
+    }
     .intel-box {
-        background-color: #001a00; border-left: 4px solid #00ff41; padding: 15px;
-        margin: 10px 0; font-size: 0.95rem; color: #d1ffd1 !important; line-height: 1.6;
+        background: #001a00;
+        border-left: 4px solid #00ff41;
+        padding: 16px;
+        margin: 12px 0;
+        font-size: 0.95rem;
+        line-height: 1.6;
+        color: #d1ffd1;
     }
-    .stTextInput input { background-color: #000 !important; color: #00ff41 !important; border: 1px solid #00ff41 !important; }
+    .stTextInput input {
+        background: #000 !important;
+        color: #00ff41 !important;
+        border: 1px solid #00ff41 !important;
+    }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-# ────────────────────────────────────────────────
-#               CACHED AI SUMMARY + TOPIC UNDERSTANDING
-# ────────────────────────────────────────────────
-@st.cache_data(ttl=3600)
-def get_ai_summary(text: str) -> str:
-    API_URL = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn"
-    if "HF_TOKEN" not in st.secrets:
-        return "CRITICAL ERROR: ACCESS_TOKEN_NOT_FOUND"
-    
-    headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
-    payload = {
-        "inputs": text[:1000],
-        "parameters": {"do_sample": False, "max_length": 140, "min_length": 60,
-                       "repetition_penalty": 1.2, "length_penalty": 1.3}
-    }
-    for _ in range(3):
-        try:
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=12)
-            result = response.json()
-            if isinstance(result, dict) and "estimated_time" in result:
-                time.sleep(4)
-                continue
-            return result[0]['summary_text']
-        except Exception:
-            continue
-    return "SUMMARY_TIMEOUT"
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 
-# New helper: AI understands the topic and returns key elements
-@st.cache_data(ttl=1800)
-def ai_extract_topic(title: str) -> str:
-    prompt = f"Extract ONLY the most important soccer elements in maximum 12 words: players, teams, event, action from this headline: {title}"
-    return get_ai_summary(prompt).strip()  # reuse same model for speed
-
-# ────────────────────────────────────────────────
-#               SOCCER FILTER
-# ────────────────────────────────────────────────
-def is_soccer_story(title: str) -> bool:
-    if not title:
-        return False
-    keywords = [
-        "football", "soccer", "premier league", "epl", "champions league", "uefa",
-        "bundesliga", "la liga", "serie a", "ligue 1", "world cup", "euro",
-        "afcon", "fifa", "psl", "kaizer chiefs", "orlando pirates", "mamelodi sundowns",
-        "man united", "man city", "liverpool", "arsenal", "chelsea", "tottenham"
+def get_headers():
+    agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0",
     ]
-    return any(kw in title.lower() for kw in keywords)
+    return {
+        "User-Agent": random.choice(agents),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.google.com/",
+        "DNT": "1",
+    }
 
-# ────────────────────────────────────────────────
-#               VIDEO HELPERS (unchanged)
-# ────────────────────────────────────────────────
-def extract_video_info(url):
+def smart_get(url, timeout=10):
+    time.sleep(random.uniform(1.1, 3.9))
+
+    # Try archive.is / 12ft.io first (paywall bypass)
+    for prefix in ["https://archive.is/", "https://12ft.io/"]:
+        try:
+            test_url = prefix + url
+            r = requests.get(test_url, headers=get_headers(), timeout=timeout, allow_redirects=True)
+            if r.ok and len(r.text) > 800:
+                return r
+        except:
+            pass
+
+    # Direct attempt with bot-friendly headers
     try:
-        r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
-        soup = BeautifulSoup(r.content, 'html.parser')
-        og_video = soup.find("meta", property="og:video") or soup.find("meta", property="og:video:secure_url")
-        if og_video and og_video.get("content"):
-            vurl = og_video["content"]
-            if "youtube.com" in vurl.lower() or "youtu.be" in vurl.lower():
-                return vurl, "youtube"
-            return vurl, "direct"
-        iframe = soup.find("iframe", src=lambda x: x and ("youtube.com/embed" in x or "youtu.be" in x))
-        if iframe and iframe.get("src"):
-            return iframe["src"], "youtube"
-        video_tag = soup.find("video")
-        if video_tag:
-            source = video_tag.find("source")
-            if source and source.get("src"):
-                return source["src"], "direct"
-        return None, None
+        r = requests.get(url, headers=get_headers(), timeout=timeout, allow_redirects=True)
+        if r.ok:
+            return r
     except:
-        return None, None
+        pass
 
-def extract_youtube_id(video_url):
-    if not video_url: return None
-    if "embed/" in video_url: return video_url.split("embed/")[-1].split("?")[0].split("&")[0]
-    if "watch?v=" in video_url: return video_url.split("watch?v=")[-1].split("&")[0]
-    if "youtu.be/" in video_url: return video_url.split("youtu.be/")[-1].split("?")[0]
     return None
 
-# ────────────────────────────────────────────────
-#               AI-POWERED WEB IMAGE SEARCH (NEW LOGIC)
-# ────────────────────────────────────────────────
-@st.cache_data(ttl=1800)
-def get_web_story_images(title: str):
-    try:
-        # 1. Let AI understand the topic
-        topic_keywords = ai_extract_topic(title)
-        
-        # 2. Build ultra-targeted query (story picture + 2 more relevant)
-        query = (
-            f'"{title}" {topic_keywords} '
-            f'(soccer OR football) (match OR action OR goal OR celebration OR player OR stadium) '
-            f'(photo OR picture OR image OR shot OR gallery) '
-            f'-stock -shutterstock -getty -istock -alamy -cartoon -illustration -vector -meme -ai -generated -logo'
-        )
+# ─── AI Helpers (using HuggingFace inference) ────────────────────────────────
 
+@st.cache_data(ttl=3600)
+def ai_summarize(text: str) -> str:
+    if "HF_TOKEN" not in st.secrets:
+        return "[HF_TOKEN missing in secrets]"
+
+    url = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+    headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
+    payload = {
+        "inputs": text[:1100],
+        "parameters": {
+            "max_length": 160,
+            "min_length": 60,
+            "do_sample": False,
+            "repetition_penalty": 1.15
+        }
+    }
+
+    for _ in range(3):
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=15)
+            data = resp.json()
+            if isinstance(data, list) and data:
+                return data[0].get("summary_text", "— summary failed —")
+            time.sleep(4)
+        except:
+            time.sleep(3)
+    return "— summary timeout —"
+
+@st.cache_data(ttl=1800)
+def ai_extract_topic(title: str) -> str:
+    prompt = f"Extract key soccer elements (teams, players, event, action) in max 10 words: {title}"
+    summary = ai_summarize(prompt)
+    return summary.strip() or title[:80]
+
+# ─── Image Search ────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=1800)
+def get_relevant_images(title: str):
+    topic = ai_extract_topic(title)
+    query = (
+        f'"{title}" {topic} '
+        f'(soccer OR football) (match OR goal OR action OR celebration OR player) '
+        f'(photo OR picture OR image OR shot) '
+        f'-stock -shutterstock -getty -istock -alamy -cartoon -illustration -meme -ai -generated'
+    )
+
+    try:
         with DDGS() as ddgs:
             results = list(ddgs.images(query, max_results=12, safesearch="off"))
 
         urls = []
         seen = set()
         for r in results:
-            img = r.get("image", "")
+            img = r.get("image")
             if not img or not img.startswith("http") or img in seen:
                 continue
-            lower = img.lower()
-            if any(bad in lower for bad in ["stock", "shutterstock", "getty", "istock", "alamy", "meme", "cartoon", "ai"]):
+            low = img.lower()
+            if any(x in low for x in ["stock", "shutterstock", "getty", "istock", "alamy", "meme", "cartoon"]):
                 continue
             seen.add(img)
             urls.append(img)
-            if len(urls) >= 3:          # exactly 3 as requested
+            if len(urls) >= 3:
                 break
-
         return urls[:3]
-    except Exception:
+    except:
         return []
 
-# ────────────────────────────────────────────────
-#               CACHED STORY SCRAPING
-# ────────────────────────────────────────────────
+# ─── Article Scraping ────────────────────────────────────────────────────────
+
 @st.cache_data(ttl=1800)
-def cached_scrape_story(url: str):
-    try:
-        r = requests.get(url, timeout=6, headers={'User-Agent': 'Mozilla/5.0'})
-        soup = BeautifulSoup(r.content, 'html.parser')
-        
-        paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 60]
-        raw_text = " ".join(paras[:5])
-        
-        original_images = []
-        for prop in ["og:image", "og:image:secure_url", "twitter:image"]:
-            meta = soup.find("meta", property=prop)
-            if meta and meta.get("content"):
-                u = meta["content"]
-                if u.startswith("http") and u not in original_images:
-                    original_images.append(u)
-        
-        for img in soup.find_all("img", src=True):
-            src = img["src"]
-            if src.startswith("//"): src = "https:" + src
-            full_src = urljoin(url, src) if not src.startswith(('http://', 'https://')) else src
-            bad = ["logo", "icon", "avatar", "pixel", "blank", "gif"]
-            if full_src not in original_images and len(original_images) < 3 and not any(b in full_src.lower() for b in bad):
-                original_images.append(full_src)
-        
-        return raw_text, original_images[:3]
-    except:
+def scrape_article(url: str):
+    r = smart_get(url)
+    if not r:
         return "", []
 
-# ────────────────────────────────────────────────
-#               CACHED RSS FEED
-# ────────────────────────────────────────────────
+    soup = BeautifulSoup(r.content, "html.parser")
+
+    # Text
+    paragraphs = [p.get_text(strip=True) for p in soup.find_all("p") if len(p.get_text(strip=True)) > 50]
+    text = " ".join(paragraphs[:6])
+
+    # Images (meta + content images)
+    images = []
+    for tag in ["og:image", "og:image:secure_url", "twitter:image"]:
+        m = soup.find("meta", property=tag)
+        if m and (val := m.get("content")) and val.startswith("http"):
+            if val not in images:
+                images.append(val)
+
+    # Fallback to img tags
+    for img in soup.find_all("img", src=True):
+        src = img["src"]
+        if src.startswith("//"): src = "https:" + src
+        src = urljoin(url, src)
+        bad = {"logo", "icon", "avatar", "banner", "pixel", "blank", "gif"}
+        if src not in images and len(images) < 4 and not any(b in src.lower() for b in bad):
+            images.append(src)
+
+    return text, images[:3]
+
+# ─── RSS Aggregation ─────────────────────────────────────────────────────────
+
 @st.cache_data(ttl=300)
-def get_live_stream():
-    feeds = [
-        ("NEWS24_SPORT", "https://feeds.24.com/articles/sport/featured/topstories/rss"),
-        ("SABC_SPORT", "https://www.sabcnews.com/sabcnews/category/sport/feed/"),
-        ("IOL_SPORT", "https://iol.co.za/rss/iol/sport"),
-        ("MAILGUARDIAN_SPORT", "https://mg.co.za/section/sport/feed/"),
-        ("GSPORT_SA", "https://gsport.co.za/feed/"),
-        ("GOAL", "https://www.goal.com/en/feeds/news"),
-        ("SKY_SPORTS", "https://www.skysports.com/rss/12040"),
-        ("GUARDIAN_FOOTBALL", "https://www.theguardian.com/football/rss"),
-        ("BBC_SPORT", "https://feeds.bbci.co.uk/sport/rss.xml"),
-        ("ESPN", "https://www.espn.com/espn/rss/news"),
-        ("YAHOO_SPORTS", "https://sports.yahoo.com/general/news/rss/"),
-        ("CNN_SPORT", "http://rss.cnn.com/rss/edition_sport.rss"),
-        ("FOX_SPORTS", "http://feeds.foxnews.com/foxnews/sports"),
-        ("NYTIMES_SPORTS", "http://rss.nytimes.com/services/xml/rss/nyt/Sports.xml"),
-        ("BLEACHER_REPORT", "https://bleacherreport.com/rss"),
-        ("TALKSPORT", "https://talksport.com/rss/sports-news/all/feed"),
-        ("SPORTS_ILLUSTRATED", "http://www.si.com/rss/si_topstories.rss"),
-        ("CBS_SPORTS", "https://www.cbssports.com/rss/headlines/"),
-        ("GUARDIAN_SPORT", "https://www.theguardian.com/sport/rss"),
-        ("BBC_FOOTBALL", "https://feeds.bbci.co.uk/sport/football/rss.xml")
+def load_soccer_feed():
+    sources = [
+        ("Goal",           "https://www.goal.com/en/feeds/news"),
+        ("Sky Sports",     "https://www.skysports.com/rss/12040"),
+        ("BBC Football",   "https://feeds.bbci.co.uk/sport/football/rss.xml"),
+        ("Guardian Football","https://www.theguardian.com/football/rss"),
+        ("ESPN",           "https://www.espn.com/espn/rss/news"),
+        ("News24 Sport",   "https://feeds.24.com/articles/sport/featured/topstories/rss"),
+        ("IOL Sport",      "https://iol.co.za/rss/iol/sport"),
     ]
-    
-    seen = {}
-    for src_name, url in feeds:
+
+    items = []
+    seen = set()
+
+    for name, feed_url in sources:
         try:
-            f = feedparser.parse(url)
-            for entry in f.entries:
-                if not is_soccer_story(entry.title):
+            feed = feedparser.parse(feed_url)
+            for entry in feed.entries:
+                title = entry.get("title", "").strip()
+                if not title or not is_soccer_related(title):
                     continue
-                link = entry.link
-                pub_time = entry.get('published_parsed') or entry.get('updated_parsed') or time.gmtime(0)
-                
-                thumbnail = None
-                if hasattr(entry, 'media_content') and entry.media_content:
-                    for m in entry.media_content:
-                        if m.get('url') and m.get('type', '').startswith('image'):
-                            thumbnail = m['url']
+
+                link = entry.get("link", "")
+                if link in seen:
+                    continue
+                seen.add(link)
+
+                thumb = None
+                if media := entry.get("media_content"):
+                    for m in media:
+                        if m.get("type", "").startswith("image"):
+                            thumb = m.get("url")
                             break
-                if not thumbnail and hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
-                    thumbnail = entry.media_thumbnail[0].get('url')
-                if not thumbnail and hasattr(entry, 'enclosure') and entry.enclosure:
-                    if entry.enclosure.get('type', '').startswith('image'):
-                        thumbnail = entry.enclosure['url']
-                
-                item = {
-                    "id": hashlib.md5(link.encode()).hexdigest(),
-                    "title": entry.title.upper(),
+                if not thumb and media_thumbs := entry.get("media_thumbnail"):
+                    thumb = media_thumbs[0].get("url")
+
+                items.append({
+                    "title": title.upper(),
                     "link": link,
-                    "src": src_name,
-                    "thumbnail": thumbnail
-                }
-                if link not in seen or pub_time > seen[link][0]:
-                    seen[link] = (pub_time, item)
+                    "source": name,
+                    "thumb": thumb,
+                    "id": hashlib.md5(link.encode()).hexdigest(),
+                    "published": entry.get("published_parsed") or entry.get("updated_parsed")
+                })
         except:
             continue
-    
-    all_entries = [item for _, item in sorted(seen.values(), key=lambda x: x[0], reverse=True)][:60]
-    return all_entries
 
-# ────────────────────────────────────────────────
-#               MAIN INTERFACE
-# ────────────────────────────────────────────────
-st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_v7.2 – AI IMAGE MODE")
-st.markdown("**SOCCER-ONLY • AI UNDERSTANDS TOPIC → 1 STORY PICTURE + 2 MORE WEB IMAGES**")
-st.markdown("---")
+    items.sort(key=lambda x: x["published"] or time.gmtime(0), reverse=True)
+    return items[:60]
 
-col_header, col_ref = st.columns([5, 1])
-with col_ref:
-    if st.button("🔄 REFRESH_LIST"):
-        get_live_stream.clear()
-        st.rerun()
+def is_soccer_related(title: str) -> bool:
+    lower = title.lower()
+    terms = [
+        "football", "soccer", "premier league", "champions league", "epl", "bundesliga",
+        "la liga", "serie a", "ligue 1", "world cup", "euro", "uefa", "afcon", "fifa",
+        "kaizer chiefs", "orlando pirates", "mamelodi sundowns", "man city", "liverpool",
+        "arsenal", "chelsea", "man united", "goal", "transfer", "match", "highlights"
+    ]
+    return any(t in lower for t in terms)
 
-search_buf = st.text_input(">> INITIALIZE_FILTER_QUERY:", "").upper()
+# ─── Video Detection ─────────────────────────────────────────────────────────
 
-news_stream = get_live_stream()
-filtered_stream = [n for n in news_stream if search_buf in n['title']] if search_buf else news_stream
+def find_video(url):
+    r = smart_get(url, timeout=6)
+    if not r:
+        return None, None
 
-for item in filtered_stream:
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    # Open Graph video
+    for prop in ["og:video", "og:video:secure_url"]:
+        tag = soup.find("meta", property=prop)
+        if tag and (v := tag.get("content")):
+            if "youtube" in v or "youtu.be" in v:
+                return v, "youtube"
+            return v, "direct"
+
+    # YouTube embed / iframe
+    iframe = soup.find("iframe", src=lambda s: s and ("youtube.com/embed" in s or "youtu.be" in s))
+    if iframe and (src := iframe.get("src")):
+        return src, "youtube"
+
+    return None, None
+
+def youtube_id_from_url(url):
+    if not url:
+        return None
+    patterns = [
+        "embed/", "watch?v=", "youtu.be/"
+    ]
+    for p in patterns:
+        if p in url:
+            part = url.split(p)[-1].split("?")[0].split("&")[0]
+            return part
+    return None
+
+# ─── UI ──────────────────────────────────────────────────────────────────────
+
+st.title("📡 NEO-SCOUT  v7.3")
+st.caption("Soccer news aggregator • AI topic understanding • paywall-aware scraping • relevant web images")
+
+if st.button("⟳ Refresh feed", type="primary"):
+    load_soccer_feed.clear()
+    st.rerun()
+
+query = st.text_input("Filter headlines", "").upper().strip()
+
+feed = load_soccer_feed()
+if query:
+    feed = [e for e in feed if query in e["title"]]
+
+for entry in feed:
     with st.container(border=True):
-        st.write(f"SOURCE_NODE: {item['src']}")
-        
-        if item.get("thumbnail"):
-            st.image(item["thumbnail"], use_container_width=True, caption="RSS THUMBNAIL")
-        
-        st.subheader(item['title'])
-        
-        c1, c2 = st.columns([1, 4])
-        with c1:
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                if st.button("RUN_DEEP_INTEL", key=f"ai_{item['id']}"):
-                    with st.spinner(">> AI ANALYZING TOPIC + FETCHING STORY PICTURE + 2 MORE..."):
-                        raw_text, original_images = cached_scrape_story(item['link'])
-                        
-                        # AI-powered web images (1 story picture + 2 more)
-                        web_images = get_web_story_images(item['title'])
-                        
-                        # ORIGINAL SOURCE IMAGES
-                        if original_images:
-                            st.write("**📸 IMAGES FROM ORIGINAL SOURCE**")
-                            cols = st.columns(min(3, len(original_images)))
-                            for idx, img_url in enumerate(original_images):
-                                with cols[idx]:
+        st.write(f"**{entry['source']}**")
+        if entry["thumb"]:
+            st.image(entry["thumb"], use_column_width=True)
+
+        st.subheader(entry["title"])
+
+        colA, colB = st.columns([1, 4])
+
+        with colA:
+            b1, b2 = st.columns(2)
+
+            with b1:
+                if st.button("Deep Intel", key=f"intel_{entry['id']}"):
+                    with st.spinner("Analyzing article + searching relevant images..."):
+                        text, orig_imgs = scrape_article(entry["link"])
+
+                        web_imgs = get_relevant_images(entry["title"])
+
+                        # Original images
+                        if orig_imgs:
+                            st.markdown("**Original article images**")
+                            cols = st.columns(min(3, len(orig_imgs)))
+                            for i, img in enumerate(orig_imgs):
+                                with cols[i % 3]:
                                     try:
-                                        st.image(img_url, use_container_width=True)
+                                        st.image(img, use_column_width=True)
                                     except:
-                                        st.caption("Image failed")
-                                    st.markdown(f"[📥]({img_url})")
-                        else:
-                            st.info("No images in original article")
-                        
-                        # AI-UNDERSTOOD WEB IMAGES (exactly as requested)
-                        if web_images:
-                            st.write("**🌐 AI-UNDERSTOOD WEB IMAGES** (story picture + 2 more)")
-                            cols = st.columns(min(3, len(web_images)))
-                            for idx, img_url in enumerate(web_images):
-                                with cols[idx]:
+                                        st.caption("Image unavailable")
+                                    st.markdown(f"[⬇]({img})")
+
+                        # AI-guided web images
+                        if web_imgs:
+                            st.markdown("**AI-relevant web images**")
+                            cols = st.columns(min(3, len(web_imgs)))
+                            for i, img in enumerate(web_imgs):
+                                with cols[i % 3]:
                                     try:
-                                        st.image(img_url, use_container_width=True)
+                                        st.image(img, use_column_width=True)
                                     except:
-                                        st.caption("Image failed")
-                                    st.markdown(f"[📥]({img_url})")
+                                        st.caption("Image unavailable")
+                                    st.markdown(f"[⬇]({img})")
                         else:
-                            st.info("No relevant AI-guided images found")
-                        
-                        # AI SUMMARY
-                        if len(raw_text) > 180:
-                            report = get_ai_summary(raw_text)
-                            st.markdown(
-                                f"""
-                                <div class="intel-box">
-                                    <strong>[AI SUMMARY – CACHED]</strong><br><br>
-                                    {report}
-                                </div>
-                                """.strip(),
-                                unsafe_allow_html=True
-                            )
+                            st.info("No good matching images found")
+
+                        # Summary
+                        if len(text) > 180:
+                            summary = ai_summarize(text)
+                            st.markdown(f"""
+                            <div class="intel-box">
+                                <strong>AI Summary</strong><br><br>
+                                {summary}
+                            </div>
+                            """, unsafe_allow_html=True)
                         else:
-                            st.write(">> TEXT TOO SHORT FOR SUMMARY")
-            
-            with col_btn2:
-                if st.button("🎥 SCAN_VIDEO", key=f"vid_{item['id']}"):
-                    with st.spinner("Scanning for video..."):
-                        video_url, video_type = extract_video_info(item['link'])
-                        if video_url:
-                            if video_type == "youtube":
-                                vid_id = extract_youtube_id(video_url)
-                                if vid_id:
-                                    st.success("YouTube video found")
+                            st.info("Article text too short to summarize")
+
+            with b2:
+                if st.button("Find Video", key=f"vid_{entry['id']}"):
+                    with st.spinner("Looking for embedded video..."):
+                        vid_url, vtype = find_video(entry["link"])
+                        if vid_url:
+                            if vtype == "youtube":
+                                yid = youtube_id_from_url(vid_url)
+                                if yid:
                                     components.html(
                                         f'<iframe width="100%" height="360" '
-                                        f'src="https://www.youtube.com/embed/{vid_id}" '
+                                        f'src="https://www.youtube.com/embed/{yid}" '
                                         f'frameborder="0" allowfullscreen></iframe>',
                                         height=380
                                     )
                             else:
-                                st.success("Direct video found")
-                                st.video(video_url)
+                                st.video(vid_url)
                         else:
-                            st.info("No video detected")
-        
-        with c2:
-            st.markdown(f"[>> FULL ARTICLE]({item['link']})")
+                            st.info("No video found on page")
+
+        with colB:
+            st.markdown(f"[Read full article →]({entry['link']})")
 
 st.markdown("---")
-st.caption("v7.2 • AI now understands headline → picks 1 story picture + 2 more relevant web images")
+st.caption("NEO-SCOUT v7.3  •  AI topic understanding • archive/12ft bypass • DuckDuckGo image search")
