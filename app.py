@@ -1,191 +1,184 @@
 import streamlit as st
 import requests
-from bs4 import BeautifulSoup
-import os
+import feedparser
+import hashlib
+import time
 import re
-import random
 from collections import Counter
+from bs4 import BeautifulSoup
 import nltk
 
 nltk.download('punkt')
 nltk.download('stopwords')
 
-# ---------------- CONFIG ---------------- #
-HF_API_TOKEN = st.secrets.get("HF_API_TOKEN", "")
-HF_MODEL = "sshleifer/distilbart-cnn-12-6"
+# ────────────────────────────────────────────────
+#               CYBERPUNK UI CONFIG
+# ────────────────────────────────────────────────
+st.set_page_config(page_title="NEO-SCOUT • v10 PRO", page_icon="⚽️", layout="wide")
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-    "Accept-Language": "en-US,en;q=0.9"
-}
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Roboto+Mono:wght@400;500&display=swap');
+.stApp { background: linear-gradient(135deg, #0d0015, #120022); color: #e0e0ff; }
+h1, h2 { font-family: 'Orbitron', sans-serif; background: linear-gradient(90deg, #00f0ff, #c300ff); 
+         -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.stButton > button { border: 2px solid #00f0ff; color: #00f0ff; background: transparent; border-radius: 12px; font-weight: 600; width: 100%; }
+.card { background: rgba(30,10,60,0.8); backdrop-filter: blur(20px); border-radius: 20px; padding: 1.5rem; margin-bottom: 1rem; }
+.source-tag { background: #c300ff22; padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; }
+</style>
+""", unsafe_allow_html=True)
 
-IMAGE_DIR = "downloaded_images"
-os.makedirs(IMAGE_DIR, exist_ok=True)
-
-# ---------------- 20 SOURCES ---------------- #
-SOURCES = [
-    ("Guardian", "https://www.theguardian.com/football"),
-    ("BBC", "https://www.bbc.com/sport/football"),
-    ("ESPN", "https://www.espn.com/soccer/"),
-    ("Goal", "https://www.goal.com/en"),
-    ("Sky Sports", "https://www.skysports.com/football"),
-    ("Football365", "https://www.football365.com"),
-    ("The Athletic", "https://theathletic.com/football/"),
-    ("CBS Sports", "https://www.cbssports.com/soccer/"),
-    ("NBC Sports", "https://www.nbcsports.com/soccer"),
-    ("Yahoo Sports", "https://sports.yahoo.com/soccer/"),
-    ("Fox Sports", "https://www.foxsports.com/soccer"),
-    ("Bleacher Report", "https://bleacherreport.com/world-football"),
-    ("90min", "https://www.90min.com"),
-    ("GiveMeSport", "https://www.givemesport.com/football"),
-    ("TalkSport", "https://talksport.com/football"),
-    ("Mirror Football", "https://www.mirror.co.uk/sport/football/"),
-    ("Independent", "https://www.independent.co.uk/sport/football"),
-    ("Evening Standard", "https://www.standard.co.uk/sport/football"),
-    ("Reuters Sports", "https://www.reuters.com/lifestyle/sports/"),
-    ("AP News", "https://apnews.com/hub/soccer")
+# ────────────────────────────────────────────────
+#               20 RSS SOURCES
+# ────────────────────────────────────────────────
+ALL_SOURCES = [
+    ("GOAL", "https://www.goal.com/en/feeds/news"),
+    ("BBC", "https://feeds.bbci.co.uk/sport/football/rss.xml"),
+    ("GUARDIAN", "https://www.theguardian.com/football/rss"),
+    ("ESPN", "https://www.espn.com/espn/rss/soccer/news"),
+    ("SKY", "https://www.skysports.com/rss/12040"),
+    ("90MIN", "https://www.90min.com/posts.rss"),
+    ("CBS", "https://www.cbssports.com/rss/headlines/soccer/"),
+    ("NBC", "https://www.nbcsports.com/soccer/rss.xml"),
+    ("YAHOO", "https://sports.yahoo.com/soccer/rss/"),
+    ("FOX", "https://api.foxsports.com/v1/rss?category=soccer"),
+    ("REUTERS", "https://www.reutersagency.com/feed/?best-topics=sports"),
+    ("AP", "https://apnews.com/hub/soccer?utm_source=rss"),
+    ("MIRROR", "https://www.mirror.co.uk/sport/football/rss.xml"),
+    ("INDEPENDENT", "https://www.independent.co.uk/sport/football/rss"),
+    ("STANDARD", "https://www.standard.co.uk/sport/football/rss"),
+    ("TALKSport", "https://talksport.com/football/feed/"),
+    ("GIVEMESPORT", "https://www.givemesport.com/feed/"),
+    ("FOOTBALL365", "https://www.football365.com/rss"),
+    ("BLEACHER", "https://bleacherreport.com/articles.rss"),
+    ("THE ATHLETIC", "https://theathletic.com/rss/football/")
 ]
 
-# Session state for rotating sources
-if "source_index" not in st.session_state:
-    st.session_state.source_index = 1
+if "source_limit" not in st.session_state:
+    st.session_state.source_limit = 3
 
-# ---------------- HUGGING FACE ---------------- #
-def summarize_hf(text):
+# ────────────────────────────────────────────────
+#               SCRAPER (FALLBACK SYSTEM)
+# ────────────────────────────────────────────────
+def basic_scrape(url):
     try:
-        API_URL = f"https://api-inference.huggingface.co/models/{HF_MODEL}"
-        headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
-
-        payload = {
-            "inputs": text[:2000],
-            "parameters": {"max_length": 80, "min_length": 30}
-        }
-
-        res = requests.post(API_URL, headers=headers, json=payload, timeout=20)
-
-        if res.status_code != 200:
-            return "⚠️ HF API Error"
-
-        result = res.json()
-        return result[0]["summary_text"] if isinstance(result, list) else "No summary"
-
+        r = requests.get(url, timeout=10)
+        soup = BeautifulSoup(r.text, "html.parser")
+        text = " ".join(p.get_text() for p in soup.find_all("p")[:30])
+        img = soup.find("meta", property="og:image")
+        return text, img["content"] if img else None
     except:
-        return "Summary failed"
+        return None, None
 
-# ---------------- GENERIC SCRAPER ---------------- #
-def extract_links(url):
+@st.cache_data(ttl=1800)
+def firecrawl_scrape(url):
+    if "FIRECRAWL_KEY" not in st.secrets:
+        return basic_scrape(url)
+
     try:
-        res = requests.get(url, headers=HEADERS, timeout=10)
-        soup = BeautifulSoup(res.text, "html.parser")
-
-        links = []
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            text = a.get_text(strip=True)
-
-            if len(text) > 30 and "http" in href:
-                links.append((text, href))
-
-        return links[:5]
-
+        headers = {"Authorization": f"Bearer {st.secrets['FIRECRAWL_KEY']}"}
+        r = requests.post("https://api.firecrawl.dev/v1/scrape",
+                          json={"url": url, "formats": ["markdown"], "onlyMainContent": True},
+                          headers=headers, timeout=25)
+        if r.ok:
+            data = r.json()["data"]
+            return data.get("markdown"), data.get("metadata", {}).get("og:image")
     except:
-        return []
+        pass
 
-def scrape_article(url):
-    try:
-        res = requests.get(url, headers=HEADERS, timeout=10)
-        soup = BeautifulSoup(res.text, "html.parser")
+    return basic_scrape(url)
 
-        paragraphs = soup.find_all("p")
-        text = " ".join(p.get_text() for p in paragraphs[:30])
+# ────────────────────────────────────────────────
+#               AI SUMMARIZER (ROBUST)
+# ────────────────────────────────────────────────
+def summarize(text, title):
+    api = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+    headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
 
-        img_tag = soup.find("meta", property="og:image")
-        image_url = img_tag["content"] if img_tag else None
+    for _ in range(5):
+        try:
+            r = requests.post(api, headers=headers,
+                              json={"inputs": text[:4000], "options": {"wait_for_model": True}},
+                              timeout=60)
+            if r.status_code == 200:
+                summary = r.json()[0]["summary_text"]
+                tags = generate_tags(text)
+                return f"🚨 {title}\n\n{summary}\n\n{' '.join(tags)}"
+            elif r.status_code == 503:
+                time.sleep(10)
+        except:
+            time.sleep(3)
 
-        return text, image_url
+    return "❌ AI overloaded"
 
-    except:
-        return "", None
+# ────────────────────────────────────────────────
+#               HASHTAGS (SMART)
+# ────────────────────────────────────────────────
+def generate_tags(text):
+    words = re.findall(r"\b[A-Za-z]{5,}\b", text.lower())
+    stop = set(nltk.corpus.stopwords.words("english"))
+    common = Counter([w for w in words if w not in stop]).most_common(5)
+    return [f"#{w.capitalize()}" for w, _ in common]
 
-# ---------------- HASHTAGS ---------------- #
-def generate_hashtags(text):
-    try:
-        words = re.findall(r"\b[A-Za-z]{4,}\b", text.lower())
-        stopwords = set(nltk.corpus.stopwords.words("english"))
+# ────────────────────────────────────────────────
+#               FEED ENGINE
+# ────────────────────────────────────────────────
+@st.cache_data(ttl=300)
+def get_feed(limit):
+    items, seen = [], set()
+    for name, url in ALL_SOURCES[:limit]:
+        try:
+            feed = feedparser.parse(url)
+            for e in feed.entries:
+                if e.link not in seen:
+                    seen.add(e.link)
+                    items.append({
+                        "title": e.title.upper(),
+                        "link": e.link,
+                        "source": name,
+                        "id": hashlib.md5(e.link.encode()).hexdigest()
+                    })
+        except:
+            pass
+    return items[:40]
 
-        filtered = [w for w in words if w not in stopwords]
-        common = Counter(filtered).most_common(5)
+# ────────────────────────────────────────────────
+#               UI
+# ────────────────────────────────────────────────
+st.title("⚡️ NEO-SCOUT v10 PRO")
+st.caption(f"ACTIVE SOURCES: {st.session_state.source_limit}/20")
 
-        return [f"#{w.capitalize()}" for w, _ in common]
+feed = get_feed(st.session_state.source_limit)
 
-    except:
-        return ["#Football", "#Soccer"]
+search = st.text_input("📡 FILTER INTEL").upper()
+if search:
+    feed = [f for f in feed if search in f["title"]]
 
-# ---------------- IMAGE ---------------- #
-def download_image(url, title):
-    if not url:
-        return None
-    try:
-        res = requests.get(url, headers=HEADERS)
-        filename = re.sub(r'[\\/*?:"<>|]', "", title)[:50] + ".jpg"
-        path = os.path.join(IMAGE_DIR, filename)
-        with open(path, "wb") as f:
-            f.write(res.content)
-        return path
-    except:
-        return None
+for entry in feed:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
 
-# ---------------- UI ---------------- #
-st.set_page_config(page_title="⚽ Multi-Source Soccer AI", layout="wide")
+    col1, col2 = st.columns([4,1])
+    with col1:
+        st.markdown(f"**{entry['title']}**")
+        st.markdown(f"<span class='source-tag'>{entry['source']}</span>", unsafe_allow_html=True)
+    with col2:
+        if st.button("🚀 SCAN", key=entry["id"]):
+            content, img = firecrawl_scrape(entry["link"])
 
-st.title("⚽ Multi-Source Soccer News AI")
-st.caption("20 Sources • Auto Rotation • AI Summaries")
+            if content:
+                post = summarize(content, entry["title"])
 
-if st.button("🚀 Fetch News"):
-    max_sources = st.session_state.source_index
+                c1, c2 = st.columns([1,2])
+                with c1:
+                    if img:
+                        st.image(img, use_container_width=True)
+                with c2:
+                    st.code(post)
+            else:
+                st.error("Blocked content")
 
-    st.info(f"Using {max_sources} source(s)")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    active_sources = SOURCES[:max_sources]
-
-    for name, url in active_sources:
-        st.divider()
-        st.subheader(f"🌍 Source: {name}")
-
-        articles = extract_links(url)
-
-        if not articles:
-            st.warning("No articles found")
-            continue
-
-        for title, link in articles[:2]:
-            st.markdown(f"### {title}")
-
-            text, image_url = scrape_article(link)
-
-            if not text or len(text) < 200:
-                st.warning("⚠️ Content blocked/skipped")
-                continue
-
-            summary = summarize_hf(text)
-            hashtags = generate_hashtags(text)
-
-            if image_url:
-                st.image(image_url, use_container_width=True)
-
-            post = f"""
-🔥 {title}
-
-📝 {summary}
-
-🔗 {link}
-
-{' '.join(hashtags)}
-"""
-
-            st.text_area("📋 Copy Post", post, height=150)
-
-    # 🔥 Increase sources each refresh
-    if st.session_state.source_index < len(SOURCES):
-        st.session_state.source_index += 1
-        
+# 🔥 AUTO INCREASE SOURCES EACH REFRESH
+if st.session_state.source_limit < 20:
+    st.session_state.source_limit += 1
