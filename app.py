@@ -24,17 +24,26 @@ except:
 # ────────────────────────────────────────────────
 # CONFIG
 # ────────────────────────────────────────────────
-st.set_page_config(page_title="NEO-SCOUT v14", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT v15", layout="wide")
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # ────────────────────────────────────────────────
-# 🌍 MASSIVE SOURCE LIST (YOUR LIST)
+# SOURCES (SHORTENED FOR DEMO — USE YOUR FULL LIST)
 # ────────────────────────────────────────────────
 ALL_SOURCES = [
-    # (PASTE YOUR FULL LIST HERE EXACTLY — already supported)
+    ("GOAL", "https://www.goal.com/en/feeds/news"),
+    ("BBC", "https://feeds.bbci.co.uk/sport/football/rss.xml"),
+    ("GUARDIAN", "https://www.theguardian.com/football/rss"),
+    ("ESPN", "https://www.espn.com/espn/rss/soccer/news"),
+    ("SKY", "https://www.skysports.com/rss/12040"),
+    ("90MIN", "https://www.90min.com/posts.rss"),
+    ("CBS", "https://www.cbssports.com/rss/headlines/soccer/"),
+    ("NBC", "https://www.nbcsports.com/soccer/rss.xml"),
+    ("YAHOO", "https://sports.yahoo.com/soccer/rss/"),
+    ("FOX", "https://api.foxsports.com/v1/rss?category=soccer"),
+    # 👉 ADD YOUR FULL LIST HERE
 ]
-# NOTE: your full list goes here (too large to repeat again)
 
 # ────────────────────────────────────────────────
 # SESSION STATE
@@ -64,7 +73,7 @@ def fetch_image(title, url):
     img = fetch_article_image(url)
     if img:
         return img
-    return "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=1200&q=80"
+    return "https://images.unsplash.com/photo-1508098682722-e99c43a406b2"
 
 # ────────────────────────────────────────────────
 # SCRAPER
@@ -90,7 +99,7 @@ def generate_tags(text):
         return ["#Football", "#Soccer"]
 
 # ────────────────────────────────────────────────
-# SUMMARY (UNCHANGED)
+# SUMMARY
 # ────────────────────────────────────────────────
 def summarize(text, title):
     try:
@@ -108,7 +117,7 @@ def summarize(text, title):
 {' '.join(tags)}"""
 
 # ────────────────────────────────────────────────
-# FEED ENGINE (OPTIMIZED)
+# FEED ENGINE
 # ────────────────────────────────────────────────
 def parse_time(entry):
     try:
@@ -124,9 +133,7 @@ def get_feed(limit):
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=2)
 
-    active_sources = ALL_SOURCES[:limit]
-
-    for name, url in active_sources:
+    for name, url in ALL_SOURCES[:limit]:
         try:
             feed = feedparser.parse(url)
 
@@ -150,7 +157,6 @@ def get_feed(limit):
 
                 seen_links.add(link)
                 break
-
         except:
             continue
 
@@ -159,8 +165,7 @@ def get_feed(limit):
 # ────────────────────────────────────────────────
 # UI
 # ────────────────────────────────────────────────
-st.title("⚡ NEO-SCOUT v14")
-st.caption("GLOBAL SOCCER INTELLIGENCE • LAST 2 HOURS")
+st.title("⚡ NEO-SCOUT v15")
 
 feed = get_feed(st.session_state.source_limit)
 
@@ -174,7 +179,7 @@ ARTICLES_PER_PAGE = 5
 end = st.session_state.page * ARTICLES_PER_PAGE
 visible_feed = feed[:end]
 
-# DISPLAY
+# DISPLAY ARTICLES
 for entry in visible_feed:
     st.markdown("---")
 
@@ -193,15 +198,19 @@ for entry in visible_feed:
         st.code(post)
 
 # ────────────────────────────────────────────────
-# CONTROLS (UPDATED)
+# 🔘 BUTTONS (FIXED BELOW CONTENT)
 # ────────────────────────────────────────────────
+st.markdown("---")
+
 col1, col2 = st.columns(2)
 
 with col1:
     if st.button("📄 Load More Articles"):
         st.session_state.page += 1
+        st.rerun()
 
 with col2:
     if st.button("🌍 Load More Sources (+10)"):
         if st.session_state.source_limit < len(ALL_SOURCES):
             st.session_state.source_limit += 10
+            st.rerun()
