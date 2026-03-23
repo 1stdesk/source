@@ -4,24 +4,35 @@ import feedparser
 import hashlib
 import time
 import re
+import os
 from collections import Counter
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 import nltk
 
-nltk.download('punkt')
-nltk.download('stopwords')
+# ────────────────────────────────────────────────
+# 🔥 NLTK FIX (STREAMLIT CLOUD SAFE)
+# ────────────────────────────────────────────────
+NLTK_DIR = "/tmp/nltk_data"
+os.makedirs(NLTK_DIR, exist_ok=True)
+nltk.data.path.append(NLTK_DIR)
+
+try:
+    nltk.download("punkt", download_dir=NLTK_DIR)
+    nltk.download("stopwords", download_dir=NLTK_DIR)
+except:
+    pass
 
 # ────────────────────────────────────────────────
 # UI CONFIG
 # ────────────────────────────────────────────────
-st.set_page_config(page_title="NEO-SCOUT v10.2", page_icon="⚽️", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT v10.3", page_icon="⚽️", layout="wide")
 
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Roboto+Mono:wght@400;500&display=swap');
 .stApp { background: linear-gradient(135deg, #0d0015, #120022); color: #e0e0ff; }
-h1 { font-family: 'Orbitron', sans-serif; background: linear-gradient(90deg, #00f0ff, #c300ff); 
+h1 { font-family: 'Orbitron', sans-serif; background: linear-gradient(90deg, #00f0ff, #c300ff);
 -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 .card { background: rgba(30,10,60,0.8); border-radius: 15px; padding: 1rem; margin-bottom: 1rem; }
 .source-tag { background: #c300ff22; padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; }
@@ -43,7 +54,7 @@ ALL_SOURCES = [
     ("YAHOO", "https://sports.yahoo.com/soccer/rss/"),
     ("FOX", "https://api.foxsports.com/v1/rss?category=soccer"),
     ("REUTERS", "https://www.reutersagency.com/feed/?best-topics=sports"),
-    ("AP", "https://apnews.com/hub/soccer?utm_source=rss"),
+    ("AP", "https://apnews.com/hub/soccer"),
     ("MIRROR", "https://www.mirror.co.uk/sport/football/rss.xml"),
     ("INDEPENDENT", "https://www.independent.co.uk/sport/football/rss"),
     ("STANDARD", "https://www.standard.co.uk/sport/football/rss"),
@@ -93,20 +104,29 @@ def firecrawl_scrape(url):
     return basic_scrape(url)
 
 # ────────────────────────────────────────────────
-# SUMMARIZER (ROBUST)
+# SUMMARIZER (NEVER FAILS)
 # ────────────────────────────────────────────────
 def local_summary(text):
-    from sumy.parsers.plaintext import PlaintextParser
-    from sumy.nlp.tokenizers import Tokenizer
-    from sumy.summarizers.lsa import LsaSummarizer
+    try:
+        from sumy.parsers.plaintext import PlaintextParser
+        from sumy.nlp.tokenizers import Tokenizer
+        from sumy.summarizers.lsa import LsaSummarizer
 
-    parser = PlaintextParser.from_string(text[:2000], Tokenizer("english"))
-    summarizer = LsaSummarizer()
-    return " ".join(str(s) for s in summarizer(parser.document, 2))
+        parser = PlaintextParser.from_string(text[:2000], Tokenizer("english"))
+        summarizer = LsaSummarizer()
+
+        summary = summarizer(parser.document, 2)
+        return " ".join(str(s) for s in summary)
+
+    except:
+        # 🔥 FINAL FALLBACK (NO DEPENDENCIES)
+        sentences = text.split(". ")
+        return ". ".join(sentences[:2]) + "."
 
 
 def summarize(text, title):
     HF_TOKEN = st.secrets.get("HF_TOKEN", "")
+
     models = [
         "sshleifer/distilbart-cnn-12-6",
         "facebook/bart-large-cnn"
@@ -139,7 +159,6 @@ def summarize(text, title):
             except:
                 time.sleep(2)
 
-    # fallback
     summary = local_summary(text)
     return format_post(title, summary, text)
 
@@ -147,11 +166,13 @@ def summarize(text, title):
 # HASHTAGS
 # ────────────────────────────────────────────────
 def generate_tags(text):
-    words = re.findall(r"\b[A-Za-z]{5,}\b", text.lower())
-    stop = set(nltk.corpus.stopwords.words("english"))
-    common = Counter([w for w in words if w not in stop]).most_common(5)
-    return [f"#{w.capitalize()}" for w, _ in common]
-
+    try:
+        words = re.findall(r"\b[A-Za-z]{5,}\b", text.lower())
+        stop = set(nltk.corpus.stopwords.words("english"))
+        common = Counter([w for w in words if w not in stop]).most_common(5)
+        return [f"#{w.capitalize()}" for w, _ in common]
+    except:
+        return ["#Football", "#Soccer", "#News"]
 
 def format_post(title, summary, text):
     tags = generate_tags(text)
@@ -162,7 +183,7 @@ def format_post(title, summary, text):
 {' '.join(tags)}"""
 
 # ────────────────────────────────────────────────
-# FEED ENGINE (KEY FEATURE)
+# FEED ENGINE (STRICT 2H + UNIQUE SOURCE)
 # ────────────────────────────────────────────────
 def parse_time(entry):
     try:
@@ -222,7 +243,7 @@ def get_feed(limit):
 # ────────────────────────────────────────────────
 # UI
 # ────────────────────────────────────────────────
-st.title("⚡ NEO-SCOUT v10.2")
+st.title("⚡ NEO-SCOUT v10.3")
 st.caption(f"LIVE SOURCES: {st.session_state.source_limit}/20 • LAST 2 HOURS ONLY")
 
 feed = get_feed(st.session_state.source_limit)
@@ -260,6 +281,6 @@ for entry in feed:
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-# AUTO INCREASE SOURCES
+# AUTO EXPAND SOURCES
 if st.session_state.source_limit < 20:
     st.session_state.source_limit += 1
