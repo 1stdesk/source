@@ -1,5 +1,6 @@
 streamlit
-requests
 feedparser
+requests
 beautifulsoup4
-duckduckgo-search
+transformers
+torch
