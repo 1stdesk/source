@@ -100,18 +100,39 @@ def extract_youtube_id(video_url):
     if "youtu.be/" in video_url: return video_url.split("youtu.be/")[-1].split("?")[0]
     return None
 
-# --- WEB-WIDE IMAGE SEARCH (NEW: other sources that posted about the same story) ---
+# --- WEB-WIDE IMAGE SEARCH (AI-ENHANCED: headline keywords + names extraction) ---
 def get_web_story_images(title: str):
-    """Search DuckDuckGo Images for the exact story + soccer context → pulls photos from other sites"""
+    """AI + keyword extraction → searches names/teams/events from headline for far better image results"""
     try:
-        query = f'"{title}" soccer OR football (photo OR image OR highlight OR gallery)'
+        # AI extracts key names & keywords from headline
+        ai_prompt = f"Extract ONLY the most important proper names, teams, players and event in maximum 8 words from this soccer headline: {title}"
+        ai_keywords = query_ai_deep(ai_prompt).strip()
+        
+        # Fallback keyword extraction if AI fails
+        words = [w.strip(".,!?") for w in title.split() if len(w) > 3]
+        name_keywords = " ".join([w for w in words if w[0].isupper() or any(k in w.lower() for k in ["vs","final","cup","league"])][:6])
+        
+        search_term = f"{ai_keywords} {name_keywords} {title}".strip()[:120]
+        
+        queries = [
+            f'"{search_term}" soccer OR football (photo OR image OR gallery OR highlight OR action)',
+            f"{ai_keywords} soccer player OR team OR stadium photo",
+            f"{name_keywords} football match photo OR press image"
+        ]
+        
+        all_urls = []
         with DDGS() as ddgs:
-            results = list(ddgs.images(query, max_results=6, safesearch="off"))
-        urls = [r.get("image") for r in results if r.get("image") and r.get("image").startswith("http")]
-        # Remove duplicates while preserving order
+            for q in queries:
+                results = list(ddgs.images(q, max_results=5, safesearch="off"))
+                for r in results:
+                    img = r.get("image")
+                    if img and img.startswith("http"):
+                        all_urls.append(img)
+        
+        # Deduplicate while preserving best order
         seen = {}
         unique = []
-        for u in urls:
+        for u in all_urls:
             if u not in seen:
                 seen[u] = True
                 unique.append(u)
@@ -150,7 +171,7 @@ def scrape_story_data(url):
     except:
         return "", []
 
-# --- 20 SOURCES → SOCCER-ONLY + MIXED BY LATEST + THUMBNAILS FROM RSS (unchanged) ---
+# --- 20 SOURCES → SOCCER-ONLY + MIXED BY LATEST + THUMBNAILS FROM RSS ---
 @st.cache_data(ttl=300)
 def get_live_stream():
     feeds = [
@@ -218,13 +239,13 @@ def get_live_stream():
 
 # --- MAIN INTERFACE ---
 st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_V7")
-st.markdown("**SOCCER-ONLY • 20 SOURCES • THUMBNAILS + ORIGINAL + WEB IMAGES (other sources) + AI + VIDEO**")
+st.markdown("**SOCCER-ONLY • 20 SOURCES • THUMBNAILS + ORIGINAL + WEB IMAGES (AI KEYWORD + NAMES) + AI + VIDEO**")
 st.markdown("---")
 
 col_header, col_ref = st.columns([5, 1])
 with col_ref:
     if st.button("🔄 REFRESH_LIST"):
-        get_live_stream.clear()   # ← FIXED: correct way to clear this specific cache
+        get_live_stream.clear()
         st.rerun()
 
 search_buf = st.text_input(">> INITIALIZE_FILTER_QUERY:", "").upper()
@@ -246,7 +267,7 @@ for item in filtered_stream:
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
                 if st.button("RUN_DEEP_INTEL", key=f"ai_{item['id']}"):
-                    with st.spinner(">> DECRYPTING + SCRAPING ORIGINAL + SEARCHING WEB FOR MORE IMAGES..."):
+                    with st.spinner(">> DECRYPTING + SCRAPING ORIGINAL + AI KEYWORD IMAGE SEARCH..."):
                         raw_text, original_images = scrape_story_data(item['link'])
                         web_images = get_web_story_images(item['title'])
                         
@@ -262,9 +283,9 @@ for item in filtered_stream:
                                         st.warning("⚠️ Image unavailable")
                                     st.markdown(f"[📥 DOWNLOAD]({img_url})")
                         
-                        # WEB IMAGES FROM OTHER SOURCES
+                        # WEB IMAGES FROM OTHER SOURCES (NOW AI-POWERED WITH HEADLINE NAMES/KEYWORDS)
                         if web_images:
-                            st.write("**🌐 IMAGES FROM OTHER WEB SOURCES (same story)**")
+                            st.write("**🌐 IMAGES FROM OTHER WEB SOURCES (AI keyword + names search)**")
                             cols = st.columns(min(3, len(web_images)))
                             for idx, img_url in enumerate(web_images):
                                 with cols[idx]:
@@ -274,7 +295,6 @@ for item in filtered_stream:
                                         st.warning("⚠️ Image unavailable")
                                     st.markdown(f"[📥 DOWNLOAD]({img_url})")
                         
-                        # FIXED: show "no images" only when BOTH lists are empty (all 3 image types now robust)
                         if not original_images and not web_images:
                             st.info("No images found for this story")
                         
@@ -317,4 +337,4 @@ for item in filtered_stream:
             st.markdown(f"[>> ACCESS_FULL_LINK]({item['link']})")
 
 st.markdown("---")
-st.write(">> END_OF_STREAM • ALL 3 IMAGE TYPES FIXED & ROBUST • VIDEO READY")
+st.write(">> END_OF_STREAM • ALL 3 IMAGE TYPES • WEB IMAGES NOW AI KEYWORD+NAME POWERED • VIDEO READY")
