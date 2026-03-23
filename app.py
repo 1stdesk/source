@@ -25,10 +25,10 @@ except:
 # ────────────────────────────────────────────────
 # ⚙ CONFIG
 # ────────────────────────────────────────────────
-st.set_page_config(page_title="NEO-SCOUT v12", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT v13", layout="wide")
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 
 # ────────────────────────────────────────────────
@@ -57,17 +57,22 @@ ALL_SOURCES = [
     ("ATHLETIC", "https://theathletic.com/rss/football/")
 ]
 
+# ────────────────────────────────────────────────
+# 🧠 SESSION STATE
+# ────────────────────────────────────────────────
 if "source_limit" not in st.session_state:
-    st.session_state.source_limit = 6
+    st.session_state.source_limit = 5
+
+if "page" not in st.session_state:
+    st.session_state.page = 1
 
 # ────────────────────────────────────────────────
-# 🖼 IMAGE SYSTEM (FIXED)
+# 🖼 IMAGE SYSTEM
 # ────────────────────────────────────────────────
 def fetch_article_image(url):
     try:
         r = requests.get(url, headers=HEADERS, timeout=8)
         soup = BeautifulSoup(r.text, "html.parser")
-
         img = soup.find("meta", property="og:image")
         if img and img.get("content"):
             return img["content"]
@@ -77,12 +82,10 @@ def fetch_article_image(url):
 
 
 def fetch_image(title, url):
-    # 1. Try real article image
     img = fetch_article_image(url)
     if img:
         return img
 
-    # 2. Stable fallback (no redirect issues)
     return "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=1200&q=80"
 
 # ────────────────────────────────────────────────
@@ -93,8 +96,7 @@ def scrape(url):
         r = requests.get(url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(r.text, "html.parser")
         paragraphs = soup.find_all("p")
-        text = " ".join(p.get_text() for p in paragraphs[:30])
-        return text
+        return " ".join(p.get_text() for p in paragraphs[:30])
     except:
         return None
 
@@ -178,29 +180,33 @@ def get_feed(limit):
 # ────────────────────────────────────────────────
 # 🎨 UI
 # ────────────────────────────────────────────────
-st.title("⚡ NEO-SCOUT v12")
-st.caption("REAL-TIME SOCCER INTELLIGENCE • LAST 2 HOURS")
+st.title("⚡ NEO-SCOUT v13")
+st.caption("LIVE SOCCER NEWS • LAST 2 HOURS")
 
 feed = get_feed(st.session_state.source_limit)
 
+# 🔍 FILTER
 search = st.text_input("📡 FILTER NEWS").upper()
 if search:
     feed = [f for f in feed if search in f["title"]]
 
-for entry in feed:
+# 📄 PAGINATION
+ARTICLES_PER_PAGE = 5
+end = st.session_state.page * ARTICLES_PER_PAGE
+visible_feed = feed[:end]
+
+# 📰 DISPLAY
+for entry in visible_feed:
     st.markdown("---")
 
     st.subheader(entry["title"])
     st.caption(f"{entry['source']} • {entry['time']} UTC")
 
-    # 🖼 IMAGE (FIXED SYSTEM)
     img = fetch_image(entry["title"], entry["link"])
     st.image(img, use_container_width=True)
 
-    # 🔗 LINK
     st.markdown(f"[Read full article]({entry['link']})")
 
-    # 🧠 SUMMARY BOX
     text = scrape(entry["link"])
     if text:
         post = summarize(text, entry["title"])
@@ -208,6 +214,16 @@ for entry in feed:
         st.markdown("### 📋 Social Post")
         st.code(post)
 
-# 🔄 EXPAND SOURCES GRADUALLY
-if st.session_state.source_limit < 20:
-    st.session_state.source_limit += 1
+# ────────────────────────────────────────────────
+# 🔘 CONTROLS
+# ────────────────────────────────────────────────
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("📄 Load More Articles"):
+        st.session_state.page += 1
+
+with col2:
+    if st.button("🌍 Load More Sources"):
+        if st.session_state.source_limit < 20:
+            st.session_state.source_limit += 3
