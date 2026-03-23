@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 import feedparser
 import hashlib
-import time
 import re
 import os
 from collections import Counter
@@ -26,12 +25,12 @@ except:
 # ────────────────────────────────────────────────
 # CONFIG
 # ────────────────────────────────────────────────
-st.set_page_config(page_title="NEO-SCOUT CLEAN", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT FINAL", layout="wide")
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # ────────────────────────────────────────────────
-# SOURCES (20)
+# SOURCES
 # ────────────────────────────────────────────────
 ALL_SOURCES = [
     ("GOAL", "https://www.goal.com/en/feeds/news"),
@@ -60,13 +59,19 @@ if "source_limit" not in st.session_state:
     st.session_state.source_limit = 5
 
 # ────────────────────────────────────────────────
-# IMAGE FROM WEB (HEADLINE BASED)
+# IMAGE FETCH (FIXED)
 # ────────────────────────────────────────────────
 def fetch_image(query):
     try:
-        return f"https://source.unsplash.com/900x400/?soccer,{query.replace(' ', ',')}"
+        url = f"https://source.unsplash.com/featured/?soccer,{query}"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            return response.url  # important (redirect final URL)
     except:
-        return None
+        pass
+
+    # fallback image
+    return "https://images.unsplash.com/photo-1508098682722-e99c43a406b2"
 
 # ────────────────────────────────────────────────
 # SCRAPER
@@ -81,17 +86,37 @@ def scrape(url):
         return None
 
 # ────────────────────────────────────────────────
-# SUMMARIZER (SAFE)
+# HASHTAGS
 # ────────────────────────────────────────────────
-def summarize(text):
+def generate_tags(text):
     try:
-        sentences = text.split(". ")
-        return ". ".join(sentences[:2]) + "."
+        words = re.findall(r"\b[A-Za-z]{5,}\b", text.lower())
+        stop = set(nltk.corpus.stopwords.words("english"))
+        common = Counter([w for w in words if w not in stop]).most_common(5)
+        return [f"#{w.capitalize()}" for w, _ in common]
     except:
-        return "Summary unavailable."
+        return ["#Football", "#Soccer", "#News"]
 
 # ────────────────────────────────────────────────
-# FEED ENGINE (2H + UNIQUE)
+# SUMMARY (FIXED FORMAT)
+# ────────────────────────────────────────────────
+def summarize(text, title):
+    try:
+        sentences = text.split(". ")
+        summary = ". ".join(sentences[:2]) + "."
+    except:
+        summary = "Summary unavailable."
+
+    tags = generate_tags(text)
+
+    return f"""🔥 {title}
+
+📝 {summary}
+
+{' '.join(tags)}"""
+
+# ────────────────────────────────────────────────
+# FEED ENGINE
 # ────────────────────────────────────────────────
 def parse_time(entry):
     try:
@@ -138,7 +163,7 @@ def get_feed(limit):
 # ────────────────────────────────────────────────
 # UI
 # ────────────────────────────────────────────────
-st.title("⚡ NEO-SCOUT CLEAN")
+st.title("⚡ NEO-SCOUT FINAL")
 
 feed = get_feed(st.session_state.source_limit)
 
@@ -152,21 +177,20 @@ for entry in feed:
     st.subheader(entry["title"])
     st.caption(f"{entry['source']} • {entry['time']}")
 
-    # 🖼 IMAGE FROM WEB
-    image = fetch_image(entry["title"])
-    if image:
-        st.image(image, use_container_width=True)
+    # 🖼 IMAGE FIXED
+    img = fetch_image(entry["title"])
+    st.image(img, use_container_width=True)
 
     # 🔗 LINK
     st.markdown(f"[Read full article]({entry['link']})")
 
-    # 📦 SUMMARY UNDER LINK (YOUR REQUEST)
+    # 📦 SUMMARY WITH TITLE + HASHTAGS
     text = scrape(entry["link"])
     if text:
-        summary = summarize(text)
+        post = summarize(text, entry["title"])
 
-        st.markdown("### 🧠 Summary")
-        st.info(summary)
+        st.markdown("### 📋 Social Post")
+        st.code(post)
 
 # EXPAND SOURCES
 if st.session_state.source_limit < 20:
