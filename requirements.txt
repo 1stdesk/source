@@ -1,6 +1,4 @@
 streamlit
-requests
-feedparser
-beautifulsoup4
-nltk
-sumy
+transformers
+torch
+--extra-index-url https://download.pytorch.org/whl/cpu
