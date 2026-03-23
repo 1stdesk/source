@@ -3,191 +3,182 @@ import requests
 import feedparser
 import hashlib
 from bs4 import BeautifulSoup
-from collections import Counter
-import random
+import time
 
-# --- CONFIG ---
-st.set_page_config(page_title="NEO-SCOUT V15", page_icon="📡", layout="wide")
+# --- FUTURISTIC UI CONFIG ---
+st.set_page_config(page_title="NEO-SCOUT v7.0", page_icon="📡", layout="wide")
 
-# --- SESSION ---
-if "refresh_key" not in st.session_state:
-    st.session_state.refresh_key = 0
+# Custom CSS for Futuristic/Terminal look
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
 
-# --- SIDEBAR ---
-with st.sidebar:
-    st.title("📡 NEO-SCOUT V15")
+    /* Global Background & Font */
+    .stApp {
+        background-color: #050505;
+        font-family: 'JetBrains Mono', monospace;
+    }
 
-    if st.button("🔄 Refresh Feed"):
-        st.session_state.refresh_key += 1
-        st.cache_data.clear()
-        st.rerun()
+    /* Titles and Headers */
+    h1, h2, h3, p, span, div {
+        color: #00ff41 !important; /* Matrix Green */
+        text-shadow: 0 0 5px #00ff41;
+    }
 
-    st.markdown("---")
+    /* Futuristic Cards */
+    .stElementContainer div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #0a0a0a !important;
+        border: 1px solid #00ff41 !important;
+        box-shadow: 0 0 15px rgba(0, 255, 65, 0.2);
+        padding: 20px;
+        border-radius: 2px;
+        margin-bottom: 20px;
+    }
 
-    auto_ai = st.checkbox("🧠 Auto AI", value=False)
-    show_images = st.checkbox("🖼 Images", value=True)
+    /* Terminal-style Buttons */
+    .stButton>button {
+        background-color: transparent !important;
+        color: #00ff41 !important;
+        border: 1px solid #00ff41 !important;
+        font-family: 'JetBrains Mono', monospace;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        transition: 0.3s;
+        border-radius: 0px;
+    }
 
-# --- UTIL ---
-def clean_text(text):
-    return " ".join([l.strip() for l in text.split("\n") if len(l) > 40])
+    .stButton>button:hover {
+        background-color: #00ff41 !important;
+        color: #000 !important;
+        box-shadow: 0 0 20px #00ff41;
+    }
 
-def clean_summary(text):
-    s = text.split(". ")
-    return ". ".join(s[:3]) + "."
+    /* Deep Intel Box */
+    .intel-box {
+        background-color: #001a00;
+        border-left: 4px solid #00ff41;
+        padding: 15px;
+        margin: 10px 0;
+        font-size: 0.95rem;
+        color: #d1ffd1 !important;
+        line-height: 1.6;
+    }
 
-def keywords(title):
-    ignore = {"THE","AND","TO","IN","OF","FOR","WITH"}
-    return [w for w in title.split() if w not in ignore]
+    /* Input Fields */
+    .stTextInput input {
+        background-color: #000 !important;
+        color: #00ff41 !important;
+        border: 1px solid #00ff41 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- SCRAPER (CACHED PER URL) ---
-@st.cache_data(ttl=1800)
-def scrape(url):
-    try:
-        r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
-        soup = BeautifulSoup(r.content, 'html.parser')
-
-        img = soup.find("meta", property="og:image")
-
-        paras = [p.get_text() for p in soup.find_all("p")]
-        text = clean_text(" ".join(paras[:6]))
-
-        return text, (img["content"] if img else None)
-    except:
-        return "", None
-
-# --- AI ---
-def ai_summary(text):
+# --- AI CORE (Deep Intel Parameters) ---
+def query_ai_deep(text):
+    API_URL = "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn"
+    
     if "HF_TOKEN" not in st.secrets:
-        return clean_summary(text)
+        return "CRITICAL ERROR: ACCESS_TOKEN_NOT_FOUND"
+    
+    headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
+    payload = {
+        "inputs": text[:1500],
+        "parameters": {
+            "do_sample": False,
+            "max_length": 180,
+            "min_length": 90,
+            "repetition_penalty": 1.3,
+            "length_penalty": 1.5
+        }
+    }
 
-    try:
-        API = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-        headers = {"Authorization": f"Bearer {st.secrets['HF_TOKEN']}"}
+    for i in range(3):
+        try:
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
+            result = response.json()
+            if isinstance(result, dict) and "estimated_time" in result:
+                time.sleep(5)
+                continue
+            return result[0]['summary_text']
+        except:
+            continue
+    return "SYSTEM_TIMEOUT: MODEL_FAILURE"
 
-        r = requests.post(API, headers=headers, json={"inputs": text[:1000]}, timeout=10)
-        out = r.json()
-
-        if isinstance(out, list):
-            return clean_summary(out[0]["summary_text"])
-    except:
-        pass
-
-    return clean_summary(text)
-
-# --- FEEDS ---
-@st.cache_data(ttl=600)
-def get_news(key):
+# --- DATA STREAM ---
+@st.cache_data(ttl=300)
+def get_live_stream():
     feeds = [
         "https://www.goal.com/en/feeds/news",
         "https://www.skysports.com/rss/12040",
-        "http://feeds.bbci.co.uk/sport/football/rss.xml",
-        "https://www.espn.com/espn/rss/soccer/news",
-        "https://www.theguardian.com/football/rss",
+        "https://www.theguardian.com/football/rss"
     ]
+    stream = []
+    for url in feeds:
+        try:
+            f = feedparser.parse(url)
+            for entry in f.entries[:6]:
+                stream.append({
+                    "id": hashlib.md5(entry.link.encode()).hexdigest(),
+                    "title": entry.title.upper(),
+                    "link": entry.link,
+                    "src": url.split('/')[2].upper()
+                })
+        except: continue
+    return stream
 
-    seen = set()
-    items = []
+def scrape_intel(url):
+    try:
+        r = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
+        soup = BeautifulSoup(r.content, 'html.parser')
+        img = soup.find("meta", property="og:image")
+        paras = [p.get_text() for p in soup.find_all('p') if len(p.get_text()) > 60]
+        return " ".join(paras[:5]), (img["content"] if img else None)
+    except: return "", None
 
-    for f in feeds:
-        feed = feedparser.parse(f)
-        for e in feed.entries[:4]:
+# --- MAIN INTERFACE ---
+st.title("📡 NEO-SCOUT // INTEL_AGGREGATOR_V7")
+st.markdown("---")
 
-            title = e.title.upper()
+# Refresh Control
+col_header, col_ref = st.columns([5, 1])
+with col_ref:
+    if st.button("🔄 REFRESH_LIST"):
+        st.cache_data.clear()
+        st.rerun()
 
-            if title in seen:
-                continue
-            seen.add(title)
+# Search Buffer
+search_buf = st.text_input(">> INITIALIZE_FILTER_QUERY:", "").upper()
 
-            items.append({
-                "id": hashlib.md5(e.link.encode()).hexdigest(),
-                "title": title,
-                "link": e.link,
-                "src": f.split('/')[2]
-            })
+# Load Data
+news_stream = get_live_stream()
+filtered_stream = [n for n in news_stream if search_buf in n['title']] if search_buf else news_stream
 
-    return items
-
-# --- GROUP SIMILAR ---
-def group_news(news):
-    groups = []
-    used = set()
-
-    for item in news:
-        if item["id"] in used:
-            continue
-
-        group = [item]
-        used.add(item["id"])
-
-        for other in news:
-            if other["id"] not in used:
-                if len(set(keywords(item["title"])) & set(keywords(other["title"]))) >= 3:
-                    group.append(other)
-                    used.add(other["id"])
-
-        groups.append(group)
-
-    return groups
-
-# --- TRENDING ---
-def get_trends(news):
-    words = []
-    for n in news:
-        words += keywords(n["title"])
-    return Counter(words).most_common(10)
-
-# --- HEADER ---
-st.title("📡 NEO-SCOUT V15")
-st.caption("Live Football Intelligence Feed")
-
-news = get_news(st.session_state.refresh_key)
-groups = group_news(news)
-
-col_main, col_side = st.columns([3,1])
-
-# --- MAIN FEED ---
-with col_main:
-
-    for group in groups:
-
-        main = group[0]
-
-        st.markdown("### " + main["title"])
-        st.caption(main["src"])
-
-        cols = st.columns([1,1,1])
-
-        with cols[0]:
-            if st.button("🧠 Analyze", key=main["id"]):
-
-                text, img = scrape(main["link"])
-
-                if img and show_images:
-                    st.image(img)
-
-                summary = ai_summary(text)
-                st.write(summary)
-
-        with cols[1]:
-            st.markdown(f"[🔗 Open Article]({main['link']})")
-
-        with cols[2]:
-            tags = keywords(main["title"])[:3]
-            st.caption(" ".join([f"#{t}" for t in tags]))
-
-        if len(group) > 1:
-            with st.expander(f"Related ({len(group)-1})"):
-                for g in group[1:]:
-                    st.write(g["title"])
-
-        st.markdown("---")
-
-# --- SIDE ---
-with col_side:
-    st.subheader("🔥 Trending")
-
-    for word, count in get_trends(news):
-        st.write(f"{word} ({count})")
+# Display Loop
+for item in filtered_stream:
+    with st.container(border=True):
+        st.write(f"SOURCE_NODE: {item['src']}")
+        st.subheader(item['title'])
+        
+        c1, c2 = st.columns([1, 4])
+        with c1:
+            if st.button("RUN_DEEP_INTEL", key=item['id']):
+                with st.spinner(">> DECRYPTING_AND_SUMMARIZING..."):
+                    raw_text, image = scrape_intel(item['link'])
+                    if image: st.image(image, use_container_width=True)
+                    
+                    if len(raw_text) > 200:
+                        report = query_ai_deep(raw_text)
+                        st.markdown(f"""
+                            <div class="intel-box">
+                                <strong>[AI_SCOUT_DEEP_REPORT]</strong><br><br>
+                                {report}
+                            </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.write(">> ERROR: DATA_PACKET_TOO_SMALL")
+        
+        with c2:
+            st.markdown(f"[>> ACCESS_FULL_LINK]({item['link']})")
 
 st.markdown("---")
-st.write("SYSTEM ACTIVE // V15 FEED ENGINE")
+st.write(">> END_OF_STREAM")
