@@ -26,17 +26,9 @@ except:
 # ────────────────────────────────────────────────
 # CONFIG
 # ────────────────────────────────────────────────
-st.set_page_config(page_title="NEO-SCOUT v11 ELITE", layout="wide")
+st.set_page_config(page_title="NEO-SCOUT CLEAN", layout="wide")
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
-
-# ────────────────────────────────────────────────
-# AUTO REFRESH
-# ────────────────────────────────────────────────
-REFRESH_INTERVAL = 60
-st.markdown(f"⏱ Auto-refresh every {REFRESH_INTERVAL}s")
-time.sleep(0.1)
-st.experimental_rerun if False else None  # placeholder to avoid warning
 
 # ────────────────────────────────────────────────
 # SOURCES (20)
@@ -68,12 +60,11 @@ if "source_limit" not in st.session_state:
     st.session_state.source_limit = 5
 
 # ────────────────────────────────────────────────
-# IMAGE FETCH (WEB BASED)
+# IMAGE FROM WEB (HEADLINE BASED)
 # ────────────────────────────────────────────────
-def fetch_image_from_web(query):
+def fetch_image(query):
     try:
-        url = f"https://source.unsplash.com/800x400/?soccer,{query.replace(' ', ',')}"
-        return url
+        return f"https://source.unsplash.com/900x400/?soccer,{query.replace(' ', ',')}"
     except:
         return None
 
@@ -85,34 +76,22 @@ def scrape(url):
         r = requests.get(url, headers=HEADERS, timeout=10)
         soup = BeautifulSoup(r.text, "html.parser")
         text = " ".join(p.get_text() for p in soup.find_all("p")[:30])
-        img = soup.find("meta", property="og:image")
-        return text, img["content"] if img else None
+        return text
     except:
-        return None, None
+        return None
 
 # ────────────────────────────────────────────────
-# SUMMARIZER (FAST + FALLBACK)
+# SUMMARIZER (SAFE)
 # ────────────────────────────────────────────────
 def summarize(text):
-    sentences = text.split(". ")
-    return ". ".join(sentences[:2]) + "."
+    try:
+        sentences = text.split(". ")
+        return ". ".join(sentences[:2]) + "."
+    except:
+        return "Summary unavailable."
 
 # ────────────────────────────────────────────────
-# HASHTAGS + TRENDING
-# ────────────────────────────────────────────────
-def extract_keywords(text):
-    words = re.findall(r"\b[A-Za-z]{5,}\b", text.lower())
-    stop = set(nltk.corpus.stopwords.words("english"))
-    return [w for w in words if w not in stop]
-
-def get_trending(feed):
-    all_words = []
-    for f in feed:
-        all_words.extend(extract_keywords(f["title"]))
-    return Counter(all_words).most_common(5)
-
-# ────────────────────────────────────────────────
-# FEED ENGINE (2H FILTER + UNIQUE SOURCE)
+# FEED ENGINE (2H + UNIQUE)
 # ────────────────────────────────────────────────
 def parse_time(entry):
     try:
@@ -123,7 +102,6 @@ def parse_time(entry):
 def get_feed(limit):
     items = []
     seen = set()
-    used_sources = set()
 
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=2)
@@ -151,7 +129,6 @@ def get_feed(limit):
                 })
 
                 seen.add(link)
-                used_sources.add(name)
                 break
         except:
             continue
@@ -161,44 +138,36 @@ def get_feed(limit):
 # ────────────────────────────────────────────────
 # UI
 # ────────────────────────────────────────────────
-st.title("⚡ NEO-SCOUT v11 ELITE")
+st.title("⚡ NEO-SCOUT CLEAN")
 
 feed = get_feed(st.session_state.source_limit)
 
-# 🔥 TRENDING PANEL
-trending = get_trending(feed)
-st.markdown("### 🔥 TRENDING")
-st.write(", ".join([f"#{w}" for w, _ in trending]))
-
-# 🔍 FILTER
 search = st.text_input("📡 FILTER").upper()
 if search:
     feed = [f for f in feed if search in f["title"]]
 
-# 📰 FEED DISPLAY
 for entry in feed:
     st.markdown("---")
 
     st.subheader(entry["title"])
     st.caption(f"{entry['source']} • {entry['time']}")
 
-    text, img = scrape(entry["link"])
-
-    # 🖼 IMAGE LOGIC
-    if not img:
-        img = fetch_image_from_web(entry["title"])
-
-    if img:
-        st.image(img, use_container_width=True)
+    # 🖼 IMAGE FROM WEB
+    image = fetch_image(entry["title"])
+    if image:
+        st.image(image, use_container_width=True)
 
     # 🔗 LINK
     st.markdown(f"[Read full article]({entry['link']})")
 
-    # 🧠 SUMMARY BELOW LINK
+    # 📦 SUMMARY UNDER LINK (YOUR REQUEST)
+    text = scrape(entry["link"])
     if text:
         summary = summarize(text)
-        st.write(summary)
 
-# 🔄 AUTO EXPAND SOURCES
+        st.markdown("### 🧠 Summary")
+        st.info(summary)
+
+# EXPAND SOURCES
 if st.session_state.source_limit < 20:
     st.session_state.source_limit += 1
