@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 import random
 import re
 
-# --- CONFIG & THEME ---
+# --- CONFIG & STYLING ---
 st.set_page_config(page_title="Soccer Social Trends 2026", page_icon="🔥", layout="wide")
 
 st.markdown("""
@@ -27,61 +27,59 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- MASTER SOURCE POOL (From uploaded list) ---
-# Using names and base URLs to construct trending feed checks
+# --- SOURCE POOL ---
+# Integrated from your provided list of major sports outlets
 MASTER_POOL = [
-    ("Goal.com", "https://www.goal.com/en/feeds/news"),
+    ("Goal Global", "https://www.goal.com/en/feeds/news"),
     ("Sky Sports", "https://www.skysports.com/rss/12040"),
     ("BBC Sport", "https://push.api.bbci.co.uk/morph/items?page=1&limit=10&feed=football"),
-    ("The Guardian", "https://www.theguardian.com/football/rss"),
-    ("ESPN FC", "https://www.espn.com/espn/rss/soccer/news"),
     ("Soccer Laduma", "https://www.soccerladuma.co.za/rss"),
     ("KickOff", "https://www.kickoff.com/rss"),
     ("Transfermarkt", "https://www.transfermarkt.com/rss/news"),
     ("90min", "https://www.90min.com/posts.rss"),
     ("CaughtOffside", "https://www.caughtoffside.com/feed/"),
-    ("Marca", "https://e00-marca.uecdn.es/rss/en/index.xml"),
+    ("The Guardian", "https://www.theguardian.com/football/rss"),
+    ("Marca English", "https://e00-marca.uecdn.es/rss/en/index.xml"),
     ("AS English", "https://en.as.com/rss/en/football/index.xml"),
     ("OneFootball", "https://onefootball.com/en/rss"),
-    ("Football365", "https://www.football365.com/feed"),
-    ("TEAMtalk", "https://www.teamtalk.com/feed"),
-    ("FourFourTwo", "https://www.fourfourtwo.com/feeds/all"),
     ("BeSoccer", "https://www.besoccer.com/rss"),
     ("Daily Mail", "https://www.dailymail.co.uk/sport/football/index.rss"),
     ("Sowetan Live", "https://www.sowetanlive.co.za/sport/soccer/rss"),
-    ("Daily Sun", "https://www.snl24.com/dailysun/sport/rss")
+    ("Daily Sun", "https://www.snl24.com/dailysun/sport/rss"),
+    ("Football365", "https://www.football365.com/feed"),
+    ("TEAMtalk", "https://www.teamtalk.com/feed"),
+    ("FourFourTwo", "https://www.fourfourtwo.com/feeds/all"),
+    ("KingFut", "https://www.kingfut.com/feed/")
 ]
 
-# --- AI SOCIAL SCOUT ENGINE ---
+# --- SCRAPING ENGINE (3-Paragraph Deep Dive) ---
 def get_3_paragraph_scout(url):
-    """Deep-dives into a page to return exactly 3 social-focused paragraphs."""
+    """Scrapes a page and organizes content into 3 specific paragraphs."""
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         r = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(r.content, 'html.parser')
-        
-        # Scrape substantial text blocks
         paras = [p.get_text().strip() for p in soup.find_all('p') if len(p.get_text()) > 110]
         
         if len(paras) < 3:
-            return "⚠️ This topic is trending on social media, but the content is too brief for a full report. Try another source!"
+            return "⚠️ Trending content identified, but source text is too brief for a full report. Try another link!"
 
-        # Create 3-paragraph structure
+        # Divide text into 3 sections
         chunk = len(paras) // 3
         p1 = " ".join(paras[:chunk])
         p2 = " ".join(paras[chunk:chunk*2])
         p3 = " ".join(paras[chunk*2:])
 
-        report = f"### 🔥 SOCIAL TREND DEEP-DIVE\n\n"
-        report += f"**📍 THE SOCIAL ANGLE:** {p1[:450]}...\n\n"
+        report = f"### 🔥 SOCIAL TREND REPORT\n\n"
+        report += f"**📍 THE SOCIAL BUZZ:** {p1[:450]}...\n\n"
         report += f"**🔍 KEY STORY DETAILS:** {p2[:500]}...\n\n"
         report += f"**📈 TRENDING MOMENTUM:** {p3[:450]}..."
         return report
     except Exception as e:
-        return f"❌ Scout Error: Could not reach source ({str(e)})."
+        return f"❌ Scout Connection Error: {str(e)}"
 
 def fetch_20():
-    """Ensures exactly 20 unique trending stories are loaded."""
+    """Forces exactly 20 unique stories to be displayed."""
     results = []
     shuffled = random.sample(MASTER_POOL, len(MASTER_POOL))
     for name, url in shuffled:
@@ -93,15 +91,13 @@ def fetch_20():
         except: continue
     return results
 
-# --- APP INTERFACE ---
-tab1, tab2 = st.tabs(["📢 Global News Feed", "💬 Social Trend Scout"])
+# --- INTERFACE ---
+tab1, tab2 = st.tabs(["📢 Global Scout Feed", "💬 Social Trend AI"])
 
-# Tab 1: Global Feed (Locked to 20 sources)
 with tab1:
     st.title("⚽ 20-SOURCE GLOBAL SCOUT")
     if st.button("🔄 REFRESH: SCAN 20 NEW TRENDS"):
         st.session_state.news_feed = fetch_20()
-
     if 'news_feed' not in st.session_state:
         st.session_state.news_feed = fetch_20()
 
@@ -113,13 +109,12 @@ with tab1:
         </div>
         ''', unsafe_allow_html=True)
 
-# Tab 2: Wiped & Rebuilt Trend Scout AI
 with tab2:
     st.header("🤖 Social Media Trends AI")
-    st.caption("I scan social discussions. Paste a link or ask for a 3-paragraph summary of any feed source!")
+    st.caption("Chat wiped and reset. I scan social discussions. Paste a link or ask for a summary!")
 
     if "trend_messages" not in st.session_state:
-        st.session_state.trend_messages = [{"role": "assistant", "content": "I am monitoring social media trends. Paste a URL or say 'Summarize source [number]' for a full 3-paragraph report."}]
+        st.session_state.trend_messages = [{"role": "assistant", "content": "I'm scouting social trends. Say 'Summarize source [number]' or paste any viral URL for a 3-paragraph breakdown."}]
 
     for msg in st.session_state.trend_messages:
         with st.chat_message(msg["role"]):
@@ -134,28 +129,16 @@ with tab2:
         if url_match:
             with st.spinner("Scouting social buzz for this link..."):
                 response = get_3_paragraph_scout(url_match.group())
-        
         elif "summarize source" in prompt.lower():
             try:
                 idx = int(re.search(r'\d+', prompt).group()) - 1
-                if 0 <= idx < 20:
-                    target = st.session_state.news_feed[idx]
-                    with st.spinner(f"Scouting viral details from {target['s']}..."):
-                        response = get_3_paragraph_scout(target['l'])
-                else:
-                    response = "❌ Please pick a source number between 1 and 20."
+                target = st.session_state.news_feed[idx]
+                with st.spinner(f"Scouting {target['s']} for viral details..."):
+                    response = get_3_paragraph_scout(target['l'])
             except:
-                response = "❌ I didn't get that. Try 'Summarize source 1'."
-        
+                response = "❌ I need a valid source number from 1 to 20."
         else:
-            matches = [n for n in st.session_state.news_feed if prompt.lower() in n['t'].lower()]
-            if matches:
-                response = "That matches stories in the current feed. Which one should I deep-dive into?\n\n"
-                for m in matches:
-                    idx_label = st.session_state.news_feed.index(m) + 1
-                    response += f"- **Source {idx_label}**: {m['t']}\n"
-            else:
-                response = "🔍 I don't see that specific trend. Paste an external link and I will break it down into 3 paragraphs!"
+            response = "🔍 I am a summarizer agent. Please paste a link or say 'Summarize source [number]'!"
 
         with st.chat_message("assistant"):
             st.markdown(f'<div class="summary-box">{response}</div>', unsafe_allow_html=True)
